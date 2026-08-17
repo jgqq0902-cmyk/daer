@@ -1,9 +1,10 @@
-// packages/core/scripts/godot-ai-runtime-server.ts
+// scripts/godot-ai-runtime-server.ts
 import { createServer } from "node:http";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-// packages/core/src/shared/types/card.ts
+// src/shared/types/card.ts
 var CardFactory = class {
   static {
     this.idCounter = 0;
@@ -136,7 +137,7 @@ var CardComparator = class {
   }
 };
 
-// packages/core/src/shared/types/game.ts
+// src/shared/types/game.ts
 var DEFAULT_ENABLED_MINGTANG_TYPES = {
   ["qia" /* QIA */]: true,
   ["luan" /* LUAN */]: true,
@@ -158,10 +159,11 @@ var RESPONSE_PRIORITY = {
   chi: 4,
   pass: 99
 };
-var DEFAULT_GAME_CONFIG = {
+var DEFAULT_RULE_PROFILE = Object.freeze({
+  ruleVersion: "luzhou-daer-rules-v2.4",
   playerCount: 3,
   bottomCardCount: 2,
-  enabledMingTangTypes: DEFAULT_ENABLED_MINGTANG_TYPES,
+  enabledMingTangTypes: Object.freeze({ ...DEFAULT_ENABLED_MINGTANG_TYPES }),
   guoZhangClearPolicy: "NEVER",
   rotatingDealer: true,
   mandatoryPeng: true,
@@ -169,15 +171,16 @@ var DEFAULT_GAME_CONFIG = {
   minHuPoints: 10,
   allowZeroHu: true,
   maxTurns: 200,
-  /** R6.3.1: 响应窗口默认10秒 */
   responseTimeout: 1e4,
-  /** R6.3.2: 最小3秒 */
   minResponseTimeout: 3e3,
-  /** R6.3.2: 最大30秒 */
   maxResponseTimeout: 3e4
+});
+var DEFAULT_GAME_CONFIG = {
+  ...DEFAULT_RULE_PROFILE,
+  enabledMingTangTypes: { ...DEFAULT_RULE_PROFILE.enabledMingTangTypes }
 };
 
-// packages/core/src/shared/constants/cards.ts
+// src/shared/constants/cards.ts
 var SMALL_RANKS = [
   "\u4E00",
   "\u4E8C",
@@ -207,20 +210,7 @@ var ALL_RANKS = [
   ...BIG_RANKS
 ];
 var DEAL_CONFIG = {
-  /** 4人游戏时 */
-  FOUR_PLAYERS: {
-    /** 庄家牌数 */
-    DEALER_CARDS: 21,
-    /** 闲家牌数 */
-    PLAYER_CARDS: 20,
-    /** 底牌数 */
-    BOTTOM_CARDS: 2,
-    /** 可摸牌数 */
-    DRAWABLE_CARDS: 17,
-    /** 总发牌数 */
-    TOTAL_DEALT: 21 + 20 * 2
-  },
-  /** 3人游戏时 */
+  /** 固定三人游戏 */
   THREE_PLAYERS: {
     /** 庄家牌数 */
     DEALER_CARDS: 21,
@@ -235,7 +225,7 @@ var DEAL_CONFIG = {
   }
 };
 
-// packages/core/src/shared/constants/scoring.ts
+// src/shared/constants/scoring.ts
 var HU_POINTS_TABLE = {
   ["pair" /* PAIR */]: {
     blackSmall: 0,
@@ -429,7 +419,7 @@ function hasEightBlocks(quadrupleCount, drawQuadrupleCount) {
   return quadrupleCount + drawQuadrupleCount >= EIGHT_BLOCKS_CONFIG.REQUIRED_COUNT;
 }
 
-// packages/core/src/shared/constants/melds.ts
+// src/shared/constants/melds.ts
 var MELD_DEFINITIONS = {
   /** 对子 - 2张相同 */
   ["pair" /* PAIR */]: {
@@ -496,7 +486,7 @@ function isHeavenlyWin(quadrupleCount, tripleCount) {
   return quadrupleCount >= HEAVENLY_WIN.THREE_QUADRUPLES || tripleCount >= HEAVENLY_WIN.FOUR_TRIPLES;
 }
 
-// packages/core/src/game-engine/deck-manager.ts
+// src/game-engine/deck-manager.ts
 var SMALL_RANKS2 = ["\u4E00", "\u4E8C", "\u4E09", "\u56DB", "\u4E94", "\u516D", "\u4E03", "\u516B", "\u4E5D", "\u5341"];
 var BIG_RANKS2 = ["\u58F9", "\u8D30", "\u53C1", "\u8086", "\u4F0D", "\u9646", "\u67D2", "\u634C", "\u7396", "\u62FE"];
 function getNumericValue(rank) {
@@ -601,14 +591,16 @@ var DeckManager = class {
    * 发牌
    */
   deal(deck, playerCount, dealerIndex = 0, bottomCardCountOverride, holdDealerPendingCard = false) {
-    const config = playerCount === 4 ? DEAL_CONFIG.FOUR_PLAYERS : DEAL_CONFIG.THREE_PLAYERS;
+    if (playerCount !== 3) {
+      throw new Error("Only three-player games are supported.");
+    }
+    const config = DEAL_CONFIG.THREE_PLAYERS;
     const hands = [];
     let cardIndex = 0;
     let dealerPendingCard;
-    for (let i = 0; i < playerCount; i++) {
+    for (let i = 0; i < 3; i++) {
       const isDealer = i === dealerIndex;
-      const isSittingOut = playerCount === 4 && i === 3;
-      const cardCount = isDealer ? holdDealerPendingCard ? config.PLAYER_CARDS : config.DEALER_CARDS : isSittingOut ? 0 : config.PLAYER_CARDS;
+      const cardCount = isDealer ? holdDealerPendingCard ? config.PLAYER_CARDS : config.DEALER_CARDS : config.PLAYER_CARDS;
       const hand = [];
       for (let j = 0; j < cardCount; j++) {
         if (cardIndex < deck.length) {
@@ -626,7 +618,7 @@ var DeckManager = class {
       });
       hands.push(hand);
     }
-    if (holdDealerPendingCard && dealerIndex >= 0 && dealerIndex < playerCount && cardIndex < deck.length) {
+    if (holdDealerPendingCard && dealerIndex >= 0 && dealerIndex < 3 && cardIndex < deck.length) {
       dealerPendingCard = deck[cardIndex++];
     }
     const remainingAfterDeal = deck.slice(cardIndex);
@@ -674,7 +666,7 @@ var DeckManager = class {
 };
 var deckManager = new DeckManager();
 
-// packages/core/src/game-engine/meld-detector.ts
+// src/game-engine/meld-detector.ts
 var MeldDetector = class {
   /**
    * 检测所有可能的牌型
@@ -961,7 +953,7 @@ var MeldDetector = class {
   }
 };
 
-// packages/core/src/game-engine/score-calculator.ts
+// src/game-engine/score-calculator.ts
 var ScoreCalculator = class {
   buildMingTang(type) {
     const definition = MING_TANG_FAN_TABLE[type];
@@ -1158,7 +1150,25 @@ var ScoreCalculator = class {
   }
 };
 
-// packages/core/src/game-engine/rules-validator.ts
+// src/game-engine/passed-play.ts
+function sameCardIdentity(left, right) {
+  return left.rank === right.rank && left.size === right.size;
+}
+function hasPassedCard(player, card) {
+  return player.passedPlays.some((passedPlay) => (passedPlay.actionType === "discard" || passedPlay.actionType === "chi") && sameCardIdentity(passedPlay.card, card));
+}
+function canClaimActiveCard(state, playerIndex, card, claimType) {
+  const player = state.players[playerIndex];
+  if (!player) {
+    return { allowed: false, reason: "\u73A9\u5BB6\u4E0D\u5B58\u5728" };
+  }
+  if ((claimType === "chi" || claimType === "hu") && hasPassedCard(player, card)) {
+    return { allowed: false, reason: "\u5DF2\u8FC7\u5F20\uFF0C\u4E0D\u80FD\u518D\u5403\u6216\u80E1\u6B64\u724C" };
+  }
+  return { allowed: true };
+}
+
+// src/game-engine/rules-validator.ts
 var RulesValidator = class {
   constructor() {
     this.meldDetector = new MeldDetector();
@@ -1174,9 +1184,10 @@ var RulesValidator = class {
         return cards.length === 2 && CardComparator.isSame(cards[0], cards[1]);
       case "peng" /* PENG */:
       case "triple" /* TRIPLE */:
+        return cards.length === 3 && cards.every((c) => CardComparator.isSame(cards[0], c));
       case "quadruple" /* QUADRUPLE */:
       case "draw_quadruple" /* DRAW_QUADRUPLE */:
-        return cards.every((c) => CardComparator.isSame(cards[0], c));
+        return cards.length === 4 && cards.every((c) => CardComparator.isSame(cards[0], c));
       case "sequence" /* SEQUENCE */:
         if (cards.length !== 3) return false;
         if (!cards.every((c) => c.size === cards[0].size)) return false;
@@ -1732,7 +1743,7 @@ var RulesValidator = class {
     if (isOwnDiscard) {
       return actions;
     }
-    const canHuNow = this.canHu(
+    const canHuNow = canClaimActiveCard(state, state.currentPlayerIndex, currentCard, "hu").allowed && this.canHu(
       currentPlayer.cards,
       currentPlayer.melds,
       currentCard,
@@ -1741,7 +1752,7 @@ var RulesValidator = class {
     if (canHuNow) {
       return actions;
     }
-    if (this.canZhao(currentPlayer.cards, currentCard)) {
+    if (state.ruleProfile?.mandatoryZhao !== false && this.canZhao(currentPlayer.cards, currentCard)) {
       actions.push({
         type: "zhao",
         cards: [currentCard],
@@ -1750,7 +1761,7 @@ var RulesValidator = class {
       });
       return actions;
     }
-    if (!currentPlayer.isBao && this.canPeng(currentPlayer.cards, currentCard)) {
+    if (state.ruleProfile?.mandatoryPeng !== false && !currentPlayer.isBao && this.canPeng(currentPlayer.cards, currentCard)) {
       actions.push({
         type: "peng",
         cards: [currentCard],
@@ -1791,7 +1802,7 @@ var RulesValidator = class {
    */
   validateGameState(state) {
     const errors = [];
-    if (state.players.length < 3 || state.players.length > 4) {
+    if (state.players.length !== 3) {
       errors.push(`\u65E0\u6548\u7684\u73A9\u5BB6\u6570\u91CF: ${state.players.length}`);
     }
     if (state.currentPlayerIndex < 0 || state.currentPlayerIndex >= state.players.length) {
@@ -1799,7 +1810,7 @@ var RulesValidator = class {
     }
     for (let i = 0; i < state.players.length; i++) {
       const player = state.players[i];
-      const expectedCards = player.isDealer ? state.phase === "bao_selection" /* BAO_SELECTION */ ? 21 : player.isBao ? 20 : 21 : 20;
+      const expectedCards = state.phase === "bao_selection" /* BAO_SELECTION */ ? 20 : player.isDealer && player.isBao ? 20 : player.isDealer ? 21 : 20;
       const totalCards = player.cards.length + player.melds.reduce((sum, m) => sum + m.cards.length, 0);
       if (player.hasEightBlocks && totalCards === expectedCards + 1) {
         continue;
@@ -1811,6 +1822,16 @@ var RulesValidator = class {
     if (state.phase === "bao_selection" /* BAO_SELECTION */ && !state.dealerPendingCard) {
       errors.push("\u7206\u724C\u9009\u62E9\u9636\u6BB5\u7F3A\u5C11\u5E84\u5BB6\u5F85\u5904\u7406\u7B2C21\u5F20\u724C");
     }
+    if (state.phase === "bao_selection" /* BAO_SELECTION */ && state.dealerPendingCard) {
+      const playerOwnedIds = new Set(state.players.flatMap((player) => [
+        ...player.cards,
+        ...player.melds.flatMap((meld) => meld.cards)
+      ].map((card) => card.id)));
+      const discardOwnedIds = new Set((state.discardPile.cards || []).map((card) => card.id));
+      if (playerOwnedIds.has(state.dealerPendingCard.id) || discardOwnedIds.has(state.dealerPendingCard.id)) {
+        errors.push("\u5E84\u5BB6\u5F85\u5904\u7406\u724C\u540C\u65F6\u5B58\u5728\u4E8E\u5176\u4ED6\u6240\u6709\u6743\u533A\u57DF");
+      }
+    }
     return {
       valid: errors.length === 0,
       errors
@@ -1818,13 +1839,13 @@ var RulesValidator = class {
   }
 };
 
-// packages/core/src/game-engine/turn-order.ts
+// src/game-engine/turn-order.ts
 var THREE_PLAYER_TURN_ORDER = [0, 2, 1];
 function getTurnOrder(playerCount) {
-  if (playerCount === THREE_PLAYER_TURN_ORDER.length) {
-    return [...THREE_PLAYER_TURN_ORDER];
+  if (playerCount !== THREE_PLAYER_TURN_ORDER.length) {
+    throw new Error("Only three-player turn order is supported.");
   }
-  return Array.from({ length: playerCount }, (_, index) => index);
+  return [...THREE_PLAYER_TURN_ORDER];
 }
 function getSeatPosition(playerIndex, playerCount) {
   const position = getTurnOrder(playerCount).indexOf(playerIndex);
@@ -1861,7 +1882,7 @@ function getResponderOrder(source, sourcePlayerIndex, playerCount) {
   );
 }
 
-// packages/core/src/game-engine/response-arbitrator.ts
+// src/game-engine/response-arbitrator.ts
 var ResponseArbitrator = class {
   /**
    * 仲裁多个玩家的响应，确定最终执行的响应
@@ -1918,7 +1939,7 @@ var ResponseArbitrator = class {
   /**
    * 获取玩家的座次顺序
    * 当前玩家索引为基准，计算相对顺序
-   * 例：当前玩家为2，则顺序为 2→3→1 (即 0,1,2 映射为 1,2,0)
+   * 例：当前玩家为0，则顺序为 0→2→1。
    * 
    * @param playerIndex 目标玩家索引
    * @param currentPlayerIndex 当前轮玩家索引
@@ -2041,7 +2062,7 @@ var ResponseArbitrator = class {
 };
 var responseArbitrator = new ResponseArbitrator();
 
-// packages/core/src/game-engine/turn-manager.ts
+// src/game-engine/turn-manager.ts
 var TurnManager = class {
   constructor() {
     this.rulesValidator = new RulesValidator();
@@ -2149,14 +2170,14 @@ var TurnManager = class {
       if (state.phase !== "response_collecting" /* RESPONSE_COLLECTING */ || !state.responseWindow) {
         return candidateActions;
       }
-      const recordedPriorities = state.responseWindow.responses
-        .filter((response) => response.responseType !== "pass")
-        .map((response) => priorityOf(response.responseType));
+      const recordedPriorities = state.responseWindow.responses.filter((response) => response.responseType !== "pass").map((response) => priorityOf(response.responseType));
       if (recordedPriorities.length === 0) {
         return candidateActions;
       }
       const highestRecordedPriority = Math.min(...recordedPriorities);
-      return candidateActions.filter((action) => action.type === "pass" || priorityOf(action.type) <= highestRecordedPriority);
+      return candidateActions.filter(
+        (action) => action.type === "pass" || priorityOf(action.type) <= highestRecordedPriority
+      );
     };
     if (state.isGameOver || state.phase === "ended" /* ENDED */) {
       return actions;
@@ -2183,7 +2204,7 @@ var TurnManager = class {
     const mandatoryActions = this.rulesValidator.getMandatoryActions(state);
     if (mandatoryActions.length > 0) {
       const activeCard = state.discardPile.lastDiscard;
-      const canChooseHu = state.phase === "response_collecting" /* RESPONSE_COLLECTING */ && !!activeCard && (this.rulesValidator.canHu(currentPlayer.cards, currentPlayer.melds, activeCard, state.pendingCardSource) || this.rulesValidator.getHuChiOptions(currentPlayer.cards, currentPlayer.melds, activeCard).length > 0);
+      const canChooseHu = state.phase === "response_collecting" /* RESPONSE_COLLECTING */ && !!activeCard && (canClaimActiveCard(state, state.currentPlayerIndex, activeCard, "hu").allowed && (this.rulesValidator.canHu(currentPlayer.cards, currentPlayer.melds, activeCard, state.pendingCardSource) || this.rulesValidator.getHuChiOptions(currentPlayer.cards, currentPlayer.melds, activeCard).length > 0));
       if (!canChooseHu) return mandatoryActions;
     }
     const addDiscardActions = () => {
@@ -2210,7 +2231,7 @@ var TurnManager = class {
           });
         }
       }
-      if (false && !actions.some((a) => a.type === "discard")) {
+      if (false) {
         for (const card of currentPlayer.cards) {
           actions.push({
             type: "discard",
@@ -2270,15 +2291,11 @@ var TurnManager = class {
       const prevPlayerIndex = getPreviousPlayerIndex(state.currentPlayerIndex, state.players.length);
       const sourcePlayerIndex = state.discardPile.lastDiscardPlayerIndex;
       const sourcePlayer = typeof sourcePlayerIndex === "number" ? state.players[sourcePlayerIndex] : void 0;
-      const sourcePlayerPassedThisCard = !!sourcePlayer && sourcePlayer.passedPlays.some(
-        (pp) => (pp.actionType === "chi" || pp.actionType === "discard") && pp.card.rank === targetCard.rank && pp.card.size === targetCard.size
-      );
+      const sourcePlayerPassedThisCard = !!sourcePlayer && hasPassedCard(sourcePlayer, targetCard);
       const canChiBySource = isResponseToDiscard && sourcePlayerIndex === prevPlayerIndex || state.pendingCardSource === "draw" && // 翻牌者自身响应
       (sourcePlayerIndex === state.currentPlayerIndex || // 翻牌者已过牌（passedPlays 有记录），吃权已转给下家（来源=上家）
       sourcePlayerPassedThisCard && sourcePlayerIndex === prevPlayerIndex);
-      const hasPassedThisCard = currentPlayer.passedPlays.some(
-        (pp) => (pp.actionType === "chi" || pp.actionType === "discard") && pp.card.rank === targetCard.rank && pp.card.size === targetCard.size
-      );
+      const hasPassedThisCard = hasPassedCard(currentPlayer, targetCard);
       if (!currentPlayer.isBao && canChiBySource && !hasPassedThisCard && this.rulesValidator.canChi(currentPlayer.cards, targetCard)) {
         const chiOptions = this.rulesValidator.getValidChiOptions(currentPlayer.cards, targetCard);
         if (chiOptions.length > 0) {
@@ -2311,13 +2328,14 @@ var TurnManager = class {
     }
     const canHuBySource = state.phase === "response_collecting" /* RESPONSE_COLLECTING */ && !(state.pendingCardSource === "discard" && state.discardPile.lastDiscardPlayerIndex === state.currentPlayerIndex) || state.phase === "discarding" /* DISCARDING */;
     const huActiveCard = state.phase === "response_collecting" /* RESPONSE_COLLECTING */ ? state.discardPile.lastDiscard : void 0;
-    const huViaDirect = canHuBySource && this.rulesValidator.canHu(
+    const canClaimHu = !!huActiveCard && canClaimActiveCard(state, state.currentPlayerIndex, huActiveCard, "hu").allowed;
+    const huViaDirect = canHuBySource && canClaimHu && this.rulesValidator.canHu(
       currentPlayer.cards,
       currentPlayer.melds,
       huActiveCard,
       state.pendingCardSource
     );
-    const huChiOptions = canHuBySource ? this.rulesValidator.getHuChiOptions(currentPlayer.cards, currentPlayer.melds, huActiveCard) : [];
+    const huChiOptions = canHuBySource && canClaimHu ? this.rulesValidator.getHuChiOptions(currentPlayer.cards, currentPlayer.melds, huActiveCard) : [];
     if (huViaDirect || huChiOptions.length > 0) {
       actions.push({
         type: "hu",
@@ -2337,9 +2355,9 @@ var TurnManager = class {
     }
     if (state.phase === "response_collecting" /* RESPONSE_COLLECTING */ && actions.some((action) => action.type === "hu")) {
       const targetCard = state.discardPile.lastDiscard;
-      const forcedType = targetCard && this.rulesValidator.canZhao(currentPlayer.cards, targetCard) ? "zhao" : targetCard && !currentPlayer.isBao && this.rulesValidator.canPeng(currentPlayer.cards, targetCard) ? "peng" : void 0;
+      const forcedType = targetCard && state.ruleProfile?.mandatoryZhao !== false && this.rulesValidator.canZhao(currentPlayer.cards, targetCard) ? "zhao" : targetCard && state.ruleProfile?.mandatoryPeng !== false && !currentPlayer.isBao && this.rulesValidator.canPeng(currentPlayer.cards, targetCard) ? "peng" : void 0;
       if (forcedType) {
-        return restrictByRecordedResponse(actions.filter((action) => action.type === "hu" || action.type === forcedType).map((action) => action.type === forcedType ? { ...action, isMandatory: true } : action));
+        return restrictByRecordedResponse(actions.filter((action) => action.type === "hu" || action.type === forcedType).map((action) => action.type === forcedType ? { ...action, isMandatory: true } : action).sort((left, right) => priorityOf(left.type) - priorityOf(right.type)));
       }
     }
     return restrictByRecordedResponse(actions);
@@ -2374,7 +2392,27 @@ var TurnManager = class {
   }
 };
 
-// packages/core/src/game-engine/action-handlers.ts
+// src/game-engine/opening-facts.ts
+function canDeclareHeavenlyWin(context) {
+  return context.winnerIndex === context.dealerIndex && (context.openingPhase === "bao_selection" || context.openingPhase === "dealer_pending_resolution") && context.ordinaryActionCount === 0 && context.drawOrdinal === 0;
+}
+function isFirstMountainFlipWin(context, drawOrdinal) {
+  return context.source === "draw" && context.sourcePlayerIndex === context.winnerIndex && drawOrdinal === 1;
+}
+function openingMingTangContext(state, winnerIndex) {
+  const dealerIndex = state.players.findIndex((player) => player.isDealer);
+  return {
+    dealerIndex,
+    winnerIndex,
+    openingPhase: state.openingPhase || "normal",
+    ordinaryActionCount: state.openingFacts?.ordinaryActionCount || 0,
+    drawOrdinal: state.drawOrdinal || 0,
+    source: state.pendingCardSource,
+    sourcePlayerIndex: state.discardPile.lastDiscardPlayerIndex
+  };
+}
+
+// src/game-engine/action-handlers.ts
 var ActionHandlers = class {
   constructor() {
     this.meldDetector = new MeldDetector();
@@ -2426,7 +2464,13 @@ var ActionHandlers = class {
       cards: [...state.discardPile.cards, card],
       discardHistory: [
         ...state.discardPile.discardHistory || [],
-        { card, playerIndex: state.currentPlayerIndex, source: "discard" }
+        {
+          card,
+          sourcePlayerIndex: state.currentPlayerIndex,
+          playerIndex: state.currentPlayerIndex,
+          source: "discard",
+          sequence: (state.discardPile.discardHistory || []).length + 1
+        }
       ],
       lastDiscard: card,
       lastDiscardPlayerIndex: state.currentPlayerIndex
@@ -2480,9 +2524,7 @@ var ActionHandlers = class {
     const discardPlayerIndex = state.discardPile.lastDiscardPlayerIndex;
     const isSelfDrawCard = state.pendingCardSource === "draw" && playerIndex === discardPlayerIndex;
     const sourcePlayer = typeof discardPlayerIndex === "number" ? state.players[discardPlayerIndex] : void 0;
-    const sourcePlayerPassedThisCard = !!sourcePlayer && sourcePlayer.passedPlays.some(
-      (pp) => (pp.actionType === "chi" || pp.actionType === "discard") && pp.card.rank === targetCard.rank && pp.card.size === targetCard.size
-    );
+    const sourcePlayerPassedThisCard = !!sourcePlayer && hasPassedCard(sourcePlayer, targetCard);
     if (player.isBao) {
       return { canChi: false, reason: "\u7206\u724C\u540E\u4E0D\u80FD\u5403\u724C" };
     }
@@ -2501,9 +2543,7 @@ var ActionHandlers = class {
         return { canChi: false, reason: "\u53EA\u80FD\u5403\u4E0A\u5BB6\u7684\u724C\u6216\u81EA\u5DF1\u7FFB\u7684\u724C" };
       }
     }
-    const hasPassedThisCard = player.passedPlays.some(
-      (pp) => (pp.actionType === "chi" || pp.actionType === "discard") && pp.card.rank === targetCard.rank && pp.card.size === targetCard.size
-    );
+    const hasPassedThisCard = hasPassedCard(player, targetCard);
     if (hasPassedThisCard) {
       return { canChi: false, reason: "\u5DF2\u8FC7\u5F20\uFF0C\u4E0D\u80FD\u518D\u5403\u6B64\u724C" };
     }
@@ -2763,7 +2803,8 @@ var ActionHandlers = class {
       return state;
     }
     const finalMelds = winningHandMelds ? [...landedMelds, ...winningHandMelds] : landedMelds;
-    const isHeavenlyWin2 = state.turnCount === 0 && this.rulesValidator.checkHeavenlyWin(heavenlyWinCards);
+    const openingFacts = openingMingTangContext(state, playerIndex);
+    const isHeavenlyWin2 = canDeclareHeavenlyWin(openingFacts) && this.rulesValidator.checkHeavenlyWin(heavenlyWinCards);
     const isDrawResponseWin = state.pendingCardSource === "draw" && state.discardPile.lastDiscardPlayerIndex === playerIndex;
     const isActualSelfDraw = isSelfDraw || isDrawResponseWin;
     const isDiscardWin = !isActualSelfDraw && state.discardPile.lastDiscardPlayerIndex !== void 0 && state.discardPile.lastDiscardPlayerIndex !== playerIndex && state.pendingCardSource !== "draw";
@@ -2772,7 +2813,7 @@ var ActionHandlers = class {
     const scoreResult = this.scoreCalculator.calculateTotalScore(finalMelds, {
       winType: isActualSelfDraw ? "self_draw" /* SELF_DRAW */ : void 0,
       isHeavenlyWin: isHeavenlyWin2,
-      isFirstDrawWin: isDrawResponseWin && state.turnCount === 1,
+      isFirstDrawWin: isDrawResponseWin && isFirstMountainFlipWin(openingFacts, state.drawOrdinal || 0),
       isLastDrawWin: isDrawResponseWin && state.remainingDeckCards === 0,
       isBaoWin,
       isShaBao,
@@ -2848,6 +2889,9 @@ var ActionHandlers = class {
   handlePass(state, playerId, passedActionType) {
     const playerIndex = state.players.findIndex((p) => p.playerId === playerId);
     if (passedActionType === "chi" && state.discardPile.lastDiscard) {
+      if (playerIndex < 0 || !this.canPlayerChi(state, playerIndex, state.discardPile.lastDiscard).canChi) {
+        return state;
+      }
       const updatedPlayers = [...state.players];
       const player = updatedPlayers[playerIndex];
       const passedPlay = {
@@ -2882,11 +2926,12 @@ var ActionHandlers = class {
   }
 };
 
-// packages/core/src/game-engine/game-manager.ts
+// src/game-engine/game-manager.ts
 var GameManager = class {
-  constructor() {
+  constructor(clock = () => Date.now()) {
     this.deck = [];
     this.currentConfig = DEFAULT_GAME_CONFIG;
+    this.clock = clock;
     this.deckManager = new DeckManager();
     this.turnManager = new TurnManager();
     this.actionHandlers = new ActionHandlers();
@@ -2900,7 +2945,59 @@ var GameManager = class {
   setRemainingDeckSnapshot(deck) {
     this.deck = deck.map((card) => ({ ...card }));
   }
-  materializePendingDrawCard(state) {
+  now() {
+    return this.clock();
+  }
+  snapshotRuleProfile(config) {
+    return {
+      ruleVersion: config.ruleVersion,
+      playerCount: 3,
+      bottomCardCount: config.bottomCardCount,
+      enabledMingTangTypes: { ...config.enabledMingTangTypes },
+      guoZhangClearPolicy: config.guoZhangClearPolicy,
+      rotatingDealer: config.rotatingDealer,
+      mandatoryPeng: config.mandatoryPeng,
+      mandatoryZhao: config.mandatoryZhao,
+      minHuPoints: config.minHuPoints,
+      allowZeroHu: config.allowZeroHu,
+      maxTurns: config.maxTurns,
+      responseTimeout: config.responseTimeout,
+      minResponseTimeout: config.minResponseTimeout,
+      maxResponseTimeout: config.maxResponseTimeout
+    };
+  }
+  responseTimeoutMs() {
+    return Math.min(
+      this.currentConfig.maxResponseTimeout,
+      Math.max(this.currentConfig.minResponseTimeout, this.currentConfig.responseTimeout)
+    );
+  }
+  timeoutActionFor(actions) {
+    if (actions.some((action) => action.type === "zhao" && action.isMandatory)) {
+      return "timeout_zhao";
+    }
+    if (actions.some((action) => action.type === "peng" && action.isMandatory)) {
+      return "timeout_peng";
+    }
+    return "timeout_pass";
+  }
+  normalizeTimeoutAction(state, action) {
+    if (!action.type.startsWith("timeout_")) {
+      return action;
+    }
+    const window = state.responseWindow;
+    const responderIndex = window?.currentResponderIndex;
+    if (state.phase !== "response_collecting" /* RESPONSE_COLLECTING */ || !window || typeof responderIndex !== "number" || action.isSystem !== true || action.responseWindowId !== window.id || action.type !== window.timeoutAction || this.now() < window.deadlineAt || state.players[responderIndex]?.playerId !== action.playerId) {
+      return null;
+    }
+    const normalizedType = action.type === "timeout_peng" ? "peng" : action.type === "timeout_zhao" ? "zhao" : "pass";
+    const offered = this.turnManager.getAvailableActions(state);
+    if (!offered.some((candidate) => candidate.type === normalizedType)) {
+      return null;
+    }
+    return { ...action, type: normalizedType, isSystem: true };
+  }
+  materializePendingDrawCard(state, responseWindowId) {
     if (state.pendingCardSource !== "draw" || !state.discardPile.lastDiscard) {
       return state;
     }
@@ -2919,7 +3016,11 @@ var GameManager = class {
           ...state.discardPile.discardHistory || [],
           {
             card: targetCard,
-            playerIndex: state.discardPile.lastDiscardPlayerIndex ?? state.currentPlayerIndex
+            sourcePlayerIndex: state.discardPile.lastDiscardPlayerIndex ?? state.currentPlayerIndex,
+            playerIndex: state.discardPile.lastDiscardPlayerIndex ?? state.currentPlayerIndex,
+            source: "draw",
+            responseWindowId,
+            sequence: (state.discardPile.discardHistory || []).length + 1
           }
         ]
       }
@@ -2956,8 +3057,8 @@ var GameManager = class {
         ...arbitrationState,
         currentPlayerIndex: window.sourcePlayerIndex,
         responseWindow: void 0
-      });
-      return this.turnManager.endTurn(materialized);
+      }, window.id);
+      return this.turnManager.endTurn(this.completeOpeningResolution(materialized));
     }
     const playerId = state.players[winner.playerIndex].playerId;
     const actionState = {
@@ -2965,23 +3066,30 @@ var GameManager = class {
       currentPlayerIndex: winner.playerIndex,
       responseWindow: void 0
     };
+    let resolvedState;
     switch (winner.responseType) {
       case "chi":
-        return this.actionHandlers.handleChi(actionState, playerId, winner.cards, winner.chiOptionId);
+        resolvedState = this.actionHandlers.handleChi(actionState, playerId, winner.cards, winner.chiOptionId);
+        break;
       case "peng":
-        return this.actionHandlers.handlePeng(actionState, playerId);
+        resolvedState = this.actionHandlers.handlePeng(actionState, playerId);
+        break;
       case "zhao":
-        return this.actionHandlers.handleZhao(actionState, playerId);
+        resolvedState = this.actionHandlers.handleZhao(actionState, playerId);
+        break;
       case "hu":
-        return this.actionHandlers.handleHu(
+        resolvedState = this.actionHandlers.handleHu(
           actionState,
           playerId,
           window.source === "draw" && window.sourcePlayerIndex === winner.playerIndex,
           winner.huOptionId
         );
+        break;
       default:
-        return this.turnManager.endTurn({ ...actionState, currentPlayerIndex: window.sourcePlayerIndex });
+        resolvedState = this.turnManager.endTurn({ ...actionState, currentPlayerIndex: window.sourcePlayerIndex });
+        break;
     }
+    return winner.responseType === "hu" ? resolvedState : this.markOrdinaryAction(this.completeOpeningResolution(resolvedState));
   }
   advanceResponseWindow(state, _startPosition) {
     const window = state.responseWindow;
@@ -2992,9 +3100,10 @@ var GameManager = class {
       const priority = RESPONSE_PRIORITY[action.type];
       return typeof priority === "number" ? priority : Number.MAX_SAFE_INTEGER;
     };
-    const recordedPriorities = window.responses
-      .filter((response) => response.responseType !== "pass")
-      .map((response) => priorityOf(response.responseType));
+    const recordedPriorities = window.responses.filter((response) => response.responseType !== "pass").map((response) => {
+      const priority = RESPONSE_PRIORITY[response.responseType];
+      return typeof priority === "number" ? priority : Number.MAX_SAFE_INTEGER;
+    });
     const highestRecordedPriority = recordedPriorities.length > 0 ? Math.min(...recordedPriorities) : Number.MAX_SAFE_INTEGER;
     const candidates = [];
     for (let position = 0; position < window.responderOrder.length; position++) {
@@ -3005,13 +3114,16 @@ var GameManager = class {
         responseWindow: { ...nextState.responseWindow, currentResponderIndex: playerIndex }
       };
       const actions = this.getResponseActions(candidate, playerIndex);
-      const competitiveActions = actions.filter((action) => action.type !== "pass" && priorityOf(action) <= highestRecordedPriority);
+      const competitiveActions = actions.filter(
+        (action) => action.type !== "pass" && priorityOf(action) <= highestRecordedPriority
+      );
       if (competitiveActions.length > 0) {
         candidates.push({
           position,
           playerIndex,
           state: candidate,
-          actions: actions.filter((action) => action.type === "pass" || priorityOf(action) <= highestRecordedPriority)
+          // 这一层只决定当前响应者；选中后保留该玩家完整合法动作集。
+          actions
         });
         continue;
       }
@@ -3036,13 +3148,13 @@ var GameManager = class {
     const selected = candidates.find((candidate) => candidate.actions.some(
       (action) => action.type !== "pass" && priorityOf(action) === highestPriority
     ));
-    const highestPriorityActions = selected.actions.filter(
-      (action) => action.type === "pass" || priorityOf(action) === highestPriority
-    );
-    const mandatoryAction = highestPriorityActions.find(
+    const selectedActions = selected.actions;
+    const mandatoryAction = selectedActions.find(
       (action) => action.isMandatory && action.type !== "pass"
     );
-    if (mandatoryAction) {
+    const hasHuFallback = selectedActions.some((action) => action.type === "hu");
+    const hasMandatoryHuFallback = !!mandatoryAction && hasHuFallback;
+    if (mandatoryAction && !hasHuFallback) {
       const resolvedState = this.appendResponse(selected.state, {
         playerIndex: selected.playerIndex,
         responseType: mandatoryAction.type,
@@ -3059,8 +3171,12 @@ var GameManager = class {
     }
     return {
       ...selected.state,
-      responseWindow: { ...selected.state.responseWindow, currentResponderIndex: selected.playerIndex },
-      availableActions: highestPriorityActions
+      responseWindow: {
+        ...selected.state.responseWindow,
+        currentResponderIndex: selected.playerIndex,
+        timeoutAction: this.timeoutActionFor(selectedActions)
+      },
+      availableActions: hasMandatoryHuFallback ? selectedActions.filter((action) => action.type !== "pass") : selectedActions
     };
   }
   openResponseWindow(state) {
@@ -3071,17 +3187,25 @@ var GameManager = class {
       return state;
     }
     const responderOrder = getResponderOrder(source, sourcePlayerIndex, state.players.length);
+    const openedAt = this.now();
+    const responseWindowId = `${state.turnCount}:${source}:${activeCard.id}`;
+    const discardHistory = state.discardPile.discardHistory?.map(
+      (entry, index, history) => index === history.length - 1 && entry.card.id === activeCard.id ? { ...entry, responseWindowId } : entry
+    );
     const opened = {
       ...state,
       pendingResponses: [],
+      discardPile: discardHistory ? { ...state.discardPile, discardHistory } : state.discardPile,
       responseWindow: {
-        id: `${state.turnCount}:${source}:${activeCard.id}`,
+        id: responseWindowId,
         source,
         sourcePlayerIndex,
         activeCard,
         responderOrder,
         responses: [],
-        openedAt: Date.now()
+        openedAt,
+        deadlineAt: openedAt + this.responseTimeoutMs(),
+        timeoutAction: "timeout_pass"
       }
     };
     return this.advanceResponseWindow(opened, 0);
@@ -3169,6 +3293,21 @@ var GameManager = class {
       return 0;
     });
   }
+  markOrdinaryAction(state) {
+    return {
+      ...state,
+      openingPhase: "normal",
+      openingFacts: {
+        ordinaryActionCount: (state.openingFacts?.ordinaryActionCount || 0) + 1
+      }
+    };
+  }
+  completeOpeningResolution(state) {
+    if (state.openingPhase !== "dealer_pending_resolution") {
+      return state;
+    }
+    return { ...state, openingPhase: "normal" };
+  }
   prepareBaoSelection(players) {
     const preparedPlayers = players.map((player) => {
       const baoTingCards = this.rulesValidator.getBaoTingCards(player.cards, player.melds);
@@ -3192,15 +3331,15 @@ var GameManager = class {
     const dealer = state.players[dealerIndex];
     const dealerPendingCard = state.dealerPendingCard;
     if (!dealer.isBao && dealerPendingCard) {
-      const players = [...state.players];
+      const players2 = [...state.players];
       const dealerCards = dealer.cards.some((card) => card.id === dealerPendingCard.id) ? dealer.cards : [...dealer.cards, dealerPendingCard];
-      players[dealerIndex] = this.applyStartLong({
+      players2[dealerIndex] = this.applyStartLong({
         ...dealer,
         cards: this.sortCards(dealerCards)
       });
       const nextState = {
         ...state,
-        players,
+        players: players2,
         currentPlayerIndex: dealerIndex,
         phase: "discarding" /* DISCARDING */,
         dealerPendingCard: void 0,
@@ -3208,13 +3347,14 @@ var GameManager = class {
         baoDecisionIndex: void 0,
         pendingResponses: [],
         pendingCardSource: void 0,
-        skipDiscardAfterZhao: false
+        skipDiscardAfterZhao: false,
+        openingPhase: "dealer_pending_resolution"
       };
       nextState.availableActions = this.turnManager.getAvailableActions(nextState);
-      if (this.rulesValidator.checkHeavenlyWin(players[dealerIndex].cards)) {
-        return this.actionHandlers.handleHu(nextState, players[dealerIndex].playerId, true);
+      if (canDeclareHeavenlyWin(openingMingTangContext(nextState, dealerIndex)) && this.rulesValidator.checkHeavenlyWin(players2[dealerIndex].cards)) {
+        return this.actionHandlers.handleHu(nextState, players2[dealerIndex].playerId, true);
       }
-      return nextState;
+      return this.completeOpeningResolution(nextState);
     }
     const players = [...state.players];
     if (dealerPendingCard) {
@@ -3238,7 +3378,8 @@ var GameManager = class {
       baoDecisionIndex: void 0,
       pendingResponses: [],
       pendingCardSource: "draw",
-      skipDiscardAfterZhao: false
+      skipDiscardAfterZhao: false,
+      openingPhase: "dealer_pending_resolution"
     };
     return this.openResponseWindow(responseState);
   }
@@ -3353,7 +3494,7 @@ var GameManager = class {
    * 创建新游戏
    */
   createGame(config = {}) {
-    const finalConfig = { ...DEFAULT_GAME_CONFIG, ...config };
+    const finalConfig = { ...DEFAULT_GAME_CONFIG, ...config, playerCount: 3 };
     this.currentConfig = finalConfig;
     this.actionHandlers.setConfig(finalConfig);
     this.deck = Number.isFinite(finalConfig.seed) ? this.deckManager.createShuffledDeckWithSeed(finalConfig.seed) : this.deckManager.createShuffledDeck();
@@ -3379,13 +3520,6 @@ var GameManager = class {
       totalScore: 0
     }));
     players = players.map((p) => this.applyStartLong(p));
-    if (dealResult.dealerPendingCard) {
-      const openingCard = dealResult.dealerPendingCard;
-      players[dealResult.dealerIndex] = {
-        ...players[dealResult.dealerIndex],
-        cards: this.sortCards([...players[dealResult.dealerIndex].cards, openingCard])
-      };
-    }
     const baoPrepared = this.prepareBaoSelection(players);
     players = baoPrepared.players;
     const gameState = {
@@ -3408,7 +3542,12 @@ var GameManager = class {
       dealerPendingCard: dealResult.dealerPendingCard,
       baoEligiblePlayerIndices: baoPrepared.eligibleIndices,
       baoDecisionIndex: 0,
-      baoDecisions: []
+      baoDecisions: [],
+      openingPhase: baoPrepared.eligibleIndices.length > 0 ? "bao_selection" : "dealer_pending_resolution",
+      openingFacts: { ordinaryActionCount: 0 },
+      drawOrdinal: 0,
+      ruleVersion: finalConfig.ruleVersion,
+      ruleProfile: this.snapshotRuleProfile(finalConfig)
     };
     if (baoPrepared.eligibleIndices.length === 0) {
       return this.finalizeOpeningState(gameState);
@@ -3423,6 +3562,11 @@ var GameManager = class {
     if (state.isGameOver) {
       return state;
     }
+    const normalizedAction = this.normalizeTimeoutAction(state, action);
+    if (!normalizedAction) {
+      return state;
+    }
+    action = normalizedAction;
     const currentAvailable = this.turnManager.getAvailableActions(state);
     const availableTypes = new Set(currentAvailable.map((a) => a.type));
     if (!availableTypes.has(action.type)) {
@@ -3446,7 +3590,11 @@ var GameManager = class {
       case "draw":
         if (newState.phase === "drawing" /* DRAWING */ && newState.players[newState.currentPlayerIndex].cards.length < 21) {
           const drawResult = this.actionHandlers.handleDraw(newState, this.deck);
-          newState = this.openResponseWindow(drawResult.state);
+          newState = drawResult.drawnCard ? {
+            ...drawResult.state,
+            drawOrdinal: (drawResult.state.drawOrdinal || 0) + 1
+          } : drawResult.state;
+          newState = this.openResponseWindow(newState);
         }
         break;
       case "discard":
@@ -3455,7 +3603,9 @@ var GameManager = class {
             this.turnManager.getAvailableActions(newState).filter((a) => a.type === "discard" && a.cards.length > 0).map((a) => a.cards[0].id)
           );
           if (allowedDiscardIds.has(action.cards[0].id)) {
-            newState = this.openResponseWindow(this.actionHandlers.handleDiscard(newState, action.cards[0]));
+            newState = this.markOrdinaryAction(
+              this.openResponseWindow(this.actionHandlers.handleDiscard(newState, action.cards[0]))
+            );
           }
         }
         break;
@@ -3474,12 +3624,18 @@ var GameManager = class {
         {
           const current = newState.players[newState.currentPlayerIndex];
           const huActiveCard = newState.phase === "response_collecting" /* RESPONSE_COLLECTING */ ? newState.discardPile.lastDiscard : void 0;
-          const canHuNow = this.rulesValidator.canHu(
+          const canClaimHu = !huActiveCard || canClaimActiveCard(
+            newState,
+            newState.currentPlayerIndex,
+            huActiveCard,
+            "hu"
+          ).allowed;
+          const canHuNow = canClaimHu && (this.rulesValidator.canHu(
             current.cards,
             current.melds,
             huActiveCard,
             newState.pendingCardSource
-          ) || this.rulesValidator.getHuChiOptions(current.cards, current.melds, huActiveCard).length > 0;
+          ) || this.rulesValidator.getHuChiOptions(current.cards, current.melds, huActiveCard).length > 0);
           if (!canHuNow) {
             return {
               ...newState,
@@ -3642,7 +3798,7 @@ var GameManager = class {
   resetGame(state) {
     const config = {
       ...this.currentConfig,
-      playerCount: state.players.length
+      playerCount: 3
     };
     return this.createGame(config);
   }
@@ -3656,7 +3812,7 @@ var GameManager = class {
 };
 var gameManager = new GameManager();
 
-// packages/core/src/ai/opponent-inference.ts
+// src/ai/opponent-inference.ts
 var OpponentInference = class {
   /**
    * 推断对手手牌
@@ -3725,7 +3881,7 @@ var OpponentInference = class {
   }
 };
 
-// packages/core/src/ai/win-rate-calculator.ts
+// src/ai/win-rate-calculator.ts
 var WinRateCalculator = class {
   constructor() {
     this.meldDetector = new MeldDetector();
@@ -3830,7 +3986,7 @@ var WinRateCalculator = class {
   }
 };
 
-// packages/core/src/game-engine/hand-analyzer.ts
+// src/game-engine/hand-analyzer.ts
 var HandAnalyzer = class {
   constructor() {
     this.meldDetector = new MeldDetector();
@@ -4140,7 +4296,7 @@ var HandAnalyzer = class {
   }
 };
 
-// packages/core/src/ai/strategy-evaluator.ts
+// src/ai/strategy-evaluator.ts
 var StrategyEvaluator = class {
   constructor() {
     this.handAnalyzer = new HandAnalyzer();
@@ -4315,7 +4471,7 @@ var StrategyEvaluator = class {
   }
 };
 
-// packages/core/src/ai/explanation-engine.ts
+// src/ai/explanation-engine.ts
 var AIExplanationEngine = class {
   constructor() {
     this.tagLabels = {
@@ -4378,7 +4534,7 @@ var AIExplanationEngine = class {
   }
 };
 
-// packages/core/src/ai/action-ev-evaluator.ts
+// src/ai/action-ev-evaluator.ts
 var ActionEvEvaluator = class {
   evaluate(params) {
     const beforeSteps = params.beforeSteps ?? 3;
@@ -4426,7 +4582,7 @@ var ActionEvEvaluator = class {
   }
 };
 
-// packages/core/src/ai/action-priority-scorer.ts
+// src/ai/action-priority-scorer.ts
 var ActionPriorityScorer = class {
   scoreDiscardCandidate(params) {
     const listeningBonus = params.waitCount > 0 ? (params.beforeWaitCount > 0 ? 260 : 1e3) + params.remainingWaitCount * 14 + params.maxRoundScore * 3 : 0;
@@ -4470,7 +4626,7 @@ var ActionPriorityScorer = class {
   }
 };
 
-// packages/core/src/ai/policy-artifact.ts
+// src/ai/policy-artifact.ts
 var DEFAULT_POLICY_WIN_RATE_WEIGHT = 100;
 var DEFAULT_POLICY_EXPECTED_SCORE_WEIGHT = 2.5;
 var DEFAULT_POLICY_HEAD_MIN_SAMPLE_COUNT = 24;
@@ -4856,7 +5012,7 @@ function computePolicyPriority(input) {
   return objective * 100 + (input.policyScore ?? 0) * 0.01 + (input.baselinePriority ?? 0) * 1e-4;
 }
 
-// packages/core/src/ai/policy-ranking.ts
+// src/ai/policy-ranking.ts
 function computeRecommendationPriorityByMode(mode, input) {
   if (mode !== "learned") {
     return input.baselinePriority;
@@ -4869,7 +5025,7 @@ function computeRecommendationPriorityByMode(mode, input) {
   });
 }
 
-// packages/core/src/ai/policy-feature-builder.ts
+// src/ai/policy-feature-builder.ts
 var STRUCTURAL_FEATURE_KEYS = [
   "stable_structure_loss",
   "flexibility_score",
@@ -5081,7 +5237,7 @@ function buildPolicyFeatures(recommendation, fallbackAction, state) {
   };
 }
 
-// packages/core/src/ai/recommendation-generator.ts
+// src/ai/recommendation-generator.ts
 var AIRecommendationGenerator = class {
   constructor(deps) {
     this.deps = deps;
@@ -5701,7 +5857,7 @@ var AIRecommendationGenerator = class {
   }
 };
 
-// packages/core/src/ai/ai-analyzer.ts
+// src/ai/ai-analyzer.ts
 var DEFAULT_ANALYSIS_CONFIG = {
   discardTopK: 5,
   chiOptionTopK: 3,
@@ -6622,7 +6778,7 @@ var AIAnalyzer = class {
   }
 };
 
-// packages/core/src/ai/ai-player-agent.ts
+// src/ai/ai-player-agent.ts
 var AIPlayerAgent = class {
   constructor(playerId, options = {}) {
     this.playerId = playerId;
@@ -7230,7 +7386,7 @@ var AIPlayerAgent = class {
   }
 };
 
-// packages/core/src/worker/ai-worker-runtime.ts
+// src/worker/ai-worker-runtime.ts
 function isDecideRequest(request) {
   return request.type === "decideWithTrace";
 }
@@ -7325,7 +7481,7 @@ async function handleAIWorkerRequest(request) {
   }
 }
 
-// packages/core/src/bridge/godot-action-guard.ts
+// src/bridge/godot-action-guard.ts
 function isLegalGodotAction(currentState, action) {
   const actingPlayerIndex2 = currentState.phase === "response_collecting" && typeof currentState.responseWindow?.currentResponderIndex === "number" ? currentState.responseWindow.currentResponderIndex : currentState.currentPlayerIndex;
   const currentPlayer = currentState.players[actingPlayerIndex2];
@@ -7365,9 +7521,17 @@ function normalizeGodotAction(currentState, action) {
   return normalized;
 }
 
-// packages/core/scripts/godot-ai-runtime-server.ts
-var GODOT_PROTOCOL_VERSION = "daer-godot-v1";
-var GODOT_RUNTIME_VERSION = "daer-bridge-session-v5";
+// scripts/godot-ai-runtime-server.ts
+var GODOT_PROTOCOL_VERSION = "daer-godot-v2";
+var GODOT_RUNTIME_VERSION = "daer-bridge-session-v6";
+var GODOT_MAX_REQUEST_BYTES = 64 * 1024;
+var BridgeRequestError = class extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.statusCode = statusCode;
+    this.name = "BridgeRequestError";
+  }
+};
 function isGodotParentAlive(processId) {
   if (!Number.isSafeInteger(processId) || processId <= 0) return false;
   try {
@@ -7382,20 +7546,33 @@ function shouldTerminateForGodotParent(parentProcessId2, isParentAlive = isGodot
 }
 function sendJson(response, status, body) {
   response.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET, POST, OPTIONS",
-    "access-control-allow-headers": "content-type"
+    "content-type": "application/json; charset=utf-8"
   });
   response.end(JSON.stringify(body));
 }
 async function readJson(request) {
   const chunks = [];
-  for await (const chunk of request) chunks.push(Buffer.from(chunk));
+  let totalBytes = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.from(chunk);
+    totalBytes += buffer.byteLength;
+    if (totalBytes > GODOT_MAX_REQUEST_BYTES) {
+      request.resume();
+      throw new BridgeRequestError(413, "Request body is too large.");
+    }
+    chunks.push(buffer);
+  }
   const text = Buffer.concat(chunks).toString("utf8").trim();
   if (!text) return {};
-  const parsed = JSON.parse(text);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Request body must be a JSON object");
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new BridgeRequestError(400, "Request body must be valid JSON.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new BridgeRequestError(400, "Request body must be a JSON object.");
+  }
   return parsed;
 }
 function stateSignature(gameState) {
@@ -7405,10 +7582,15 @@ function stateSignature(gameState) {
     turnCount: gameState.turnCount,
     pendingCardSource: gameState.pendingCardSource,
     responder: gameState.responseWindow?.currentResponderIndex,
+    responseWindowId: gameState.responseWindow?.id,
+    deadlineAt: gameState.responseWindow?.deadlineAt,
     responses: gameState.responseWindow?.responses.length || 0,
     activeCard: gameState.discardPile.lastDiscard?.id,
     hands: gameState.players.map((player) => player.cards.length),
     melds: gameState.players.map((player) => player.melds.length),
+    ruleVersion: gameState.ruleVersion,
+    openingPhase: gameState.openingPhase,
+    drawOrdinal: gameState.drawOrdinal,
     gameOver: gameState.isGameOver
   });
 }
@@ -7446,8 +7628,8 @@ function buildGodotHandPresentation(currentState) {
     ...triples.map((meld) => toPresentation("triple", "\u574E", meld.cards))
   ];
   return {
-    // Locked melds remain unavailable for discard; the UI can show them as
-    // fixed hand groups instead of offering an illegal fallback action.
+    // The TurnManager intentionally opens every card as a deadlock fallback
+    // when a whole hand is locked. In that state availableActions wins.
     lockedHandMelds: candidates.filter((meld) => meld.cardIds.every((id) => !discardIds.has(id)))
   };
 }
@@ -7469,14 +7651,21 @@ function presentReplaySteps(steps) {
   });
 }
 function createGodotAiRuntimeServer(options = {}) {
-  const manager = new GameManager();
+  const manager = new GameManager(options.clock);
   const requestAI = options.requestAI || handleAIWorkerRequest;
   const sessionId2 = options.sessionId?.trim() || "";
+  const configuredAuthToken = options.authToken?.trim() || process.env.DAER_BRIDGE_TOKEN?.trim() || "";
+  if (configuredAuthToken && Buffer.byteLength(configuredAuthToken, "utf8") < 32) {
+    throw new Error("Bridge auth token must contain at least 256 bits.");
+  }
+  const authToken = configuredAuthToken || randomBytes(32).toString("hex");
   let state = null;
   let gameConfig = null;
   let actionLog = [];
   let replaySteps = [];
   let lastTransition;
+  let responseTimer;
+  let scheduledTimeoutKey;
   function transitionFor(before, after, action) {
     const actorPlayerIndex = before.players.findIndex((player) => player.playerId === action.playerId);
     return {
@@ -7491,13 +7680,60 @@ function createGodotAiRuntimeServer(options = {}) {
   function persist() {
     if (!options.persistenceFile || !gameConfig || !state) return;
     mkdirSync(dirname(options.persistenceFile), { recursive: true });
-    writeFileSync(options.persistenceFile, JSON.stringify({ version: 2, gameConfig, actionLog, state, replaySteps }, null, 2), "utf8");
+    writeFileSync(options.persistenceFile, JSON.stringify({ version: 3, gameConfig, actionLog, state, replaySteps }, null, 2), "utf8");
+  }
+  function clearResponseTimer() {
+    if (responseTimer) clearTimeout(responseTimer);
+    responseTimer = void 0;
+    scheduledTimeoutKey = void 0;
+  }
+  function commitTransition(before, after, action, decision) {
+    lastTransition = transitionFor(before, after, action);
+    state = after;
+    actionLog.push(action);
+    replaySteps.push({ state, action, ...decision ? { decision } : {}, transition: lastTransition });
+    persist();
+  }
+  function runResponseTimeout() {
+    const current = state;
+    const window = current?.responseWindow;
+    if (!current || !window || typeof window.currentResponderIndex !== "number") {
+      clearResponseTimer();
+      return;
+    }
+    const action = {
+      type: window.timeoutAction,
+      playerId: current.players[window.currentResponderIndex].playerId,
+      cards: [],
+      timestamp: Date.now(),
+      responseWindowId: window.id,
+      isSystem: true
+    };
+    const next = manager.processAction(current, action);
+    if (stateSignature(current) === stateSignature(next)) {
+      clearResponseTimer();
+      return;
+    }
+    commitTransition(current, next, action);
+    syncResponseTimer();
+  }
+  function syncResponseTimer() {
+    const window = state?.responseWindow;
+    if (!window || typeof window.currentResponderIndex !== "number") {
+      clearResponseTimer();
+      return;
+    }
+    const key = `${window.id}:${window.currentResponderIndex}:${window.timeoutAction}:${window.deadlineAt}`;
+    if (key === scheduledTimeoutKey) return;
+    clearResponseTimer();
+    scheduledTimeoutKey = key;
+    responseTimer = setTimeout(runResponseTimeout, Math.max(0, window.deadlineAt - Date.now()));
   }
   function restore() {
     if (!options.persistenceFile) return;
     try {
       const snapshot = JSON.parse(readFileSync(options.persistenceFile, "utf8"));
-      if (snapshot.version !== 1 && snapshot.version !== 2 || !snapshot.gameConfig || !Array.isArray(snapshot.actionLog)) return;
+      if (snapshot.version !== 3 || !snapshot.gameConfig || typeof snapshot.gameConfig.ruleVersion !== "string" || !Array.isArray(snapshot.actionLog)) return;
       gameConfig = snapshot.gameConfig;
       state = manager.createGame(gameConfig);
       actionLog = [];
@@ -7510,7 +7746,6 @@ function createGodotAiRuntimeServer(options = {}) {
         lastTransition = transitionFor(state, next, normalized);
         state = next;
         actionLog.push(normalized);
-        if (snapshot.version === 1) replaySteps.push({ state, action: normalized });
       }
     } catch {
       state = null;
@@ -7520,6 +7755,7 @@ function createGodotAiRuntimeServer(options = {}) {
     }
   }
   restore();
+  syncResponseTimer();
   function requireState() {
     if (!state) throw new Error("No active game. Call /api/game/new first.");
     return state;
@@ -7533,7 +7769,9 @@ function createGodotAiRuntimeServer(options = {}) {
       cards: Array.isArray(raw.cards) ? raw.cards : [],
       chiOptionId: typeof raw.chiOptionId === "string" ? raw.chiOptionId : void 0,
       huOptionId: typeof raw.huOptionId === "string" ? raw.huOptionId : void 0,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      responseWindowId: typeof raw.responseWindowId === "string" ? raw.responseWindowId : void 0,
+      isSystem: raw.isSystem === true
     };
   }
   function rejectFinishedGame(response, currentState) {
@@ -7585,8 +7823,12 @@ function createGodotAiRuntimeServer(options = {}) {
     return result.payload;
   }
   async function route(request, response) {
-    if (request.method === "OPTIONS") {
-      sendJson(response, 204, {});
+    const authorization = request.headers.authorization || "";
+    const providedToken = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length).trim() : "";
+    const expectedToken = Buffer.from(authToken, "utf8");
+    const actualToken = Buffer.from(providedToken, "utf8");
+    if (actualToken.length !== expectedToken.length || !timingSafeEqual(actualToken, expectedToken)) {
+      sendJson(response, 401, { ok: false, error: "Unauthorized" });
       return;
     }
     const url = new URL(request.url || "/", "http://127.0.0.1");
@@ -7607,13 +7849,19 @@ function createGodotAiRuntimeServer(options = {}) {
       sendJson(response, 404, { ok: false, error: "Not found" });
       return;
     }
+    const contentType = request.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase();
+    if (contentType !== "application/json") {
+      sendJson(response, 415, { ok: false, error: "Content-Type must be application/json." });
+      return;
+    }
     const body = await readJson(request);
     if (url.pathname === "/api/game/new") {
       const bottomCardCount = Number(body.bottomCardCount);
       const seed = typeof body.seed === "number" ? body.seed : Math.floor(Math.random() * 2147483647);
-      gameConfig = { playerCount: 3, bottomCardCount: bottomCardCount === 0 ? 0 : bottomCardCount === 1 ? 1 : 2, seed };
+      const bottomCardCountValue = bottomCardCount === 0 ? 0 : bottomCardCount === 1 ? 1 : 2;
       actionLog = [];
-      state = manager.createGame(gameConfig);
+      state = manager.createGame({ playerCount: 3, bottomCardCount: bottomCardCountValue, seed });
+      gameConfig = { ...state.ruleProfile, seed };
       lastTransition = {
         sequence: 0,
         actionType: "start",
@@ -7624,6 +7872,7 @@ function createGodotAiRuntimeServer(options = {}) {
       };
       replaySteps = [{ state, action: { type: "start", cards: [] }, transition: lastTransition }];
       persist();
+      syncResponseTimer();
       sendJson(response, 200, { ok: true, state: presentState(state, lastTransition) });
       return;
     }
@@ -7648,11 +7897,36 @@ function createGodotAiRuntimeServer(options = {}) {
         sendJson(response, 409, { ok: false, error: "The action did not advance the game.", state: presentState(currentState) });
         return;
       }
-      lastTransition = transitionFor(currentState, next, action);
-      state = next;
-      actionLog.push(action);
-      replaySteps.push({ state, action, transition: lastTransition });
-      persist();
+      commitTransition(currentState, next, action);
+      syncResponseTimer();
+      sendJson(response, 200, { ok: true, state: presentState(state, lastTransition), action });
+      return;
+    }
+    if (url.pathname === "/api/game/timeout") {
+      const currentState = requireState();
+      if (rejectFinishedGame(response, currentState)) return;
+      const window = currentState.responseWindow;
+      if (!window || typeof window.currentResponderIndex !== "number") {
+        sendJson(response, 409, { ok: false, error: "There is no active response window.", state: presentState(currentState) });
+        return;
+      }
+      const requestedWindowId = typeof body.responseWindowId === "string" ? body.responseWindowId : "";
+      const requestedType = typeof body.type === "string" ? body.type : window.timeoutAction;
+      const action = {
+        type: requestedType,
+        playerId: currentState.players[window.currentResponderIndex].playerId,
+        cards: [],
+        timestamp: Date.now(),
+        responseWindowId: requestedWindowId,
+        isSystem: true
+      };
+      const next = manager.processAction(currentState, action);
+      if (stateSignature(currentState) === stateSignature(next)) {
+        sendJson(response, 409, { ok: false, error: "The timeout action is stale, early, or not legal.", state: presentState(currentState) });
+        return;
+      }
+      commitTransition(currentState, next, action);
+      syncResponseTimer();
       sendJson(response, 200, { ok: true, state: presentState(state, lastTransition), action });
       return;
     }
@@ -7670,11 +7944,8 @@ function createGodotAiRuntimeServer(options = {}) {
         sendJson(response, 409, { ok: false, error: "The AI action did not advance the game.", state: presentState(currentState) });
         return;
       }
-      lastTransition = transitionFor(currentState, next, action);
-      state = next;
-      actionLog.push(action);
-      replaySteps.push({ state, action, decision, transition: lastTransition });
-      persist();
+      commitTransition(currentState, next, action, decision);
+      syncResponseTimer();
       sendJson(response, 200, { ok: true, state: presentState(state, lastTransition), action, decision });
       return;
     }
@@ -7698,12 +7969,20 @@ function createGodotAiRuntimeServer(options = {}) {
     }
     sendJson(response, 404, { ok: false, error: "Not found" });
   }
-  return createServer((request, response) => {
-    route(request, response).catch((error) => sendJson(response, 500, { ok: false, error: error instanceof Error ? error.message : String(error) }));
+  const server2 = createServer((request, response) => {
+    route(request, response).catch((error) => {
+      if (error instanceof BridgeRequestError) {
+        sendJson(response, error.statusCode, { ok: false, error: error.message });
+        return;
+      }
+      sendJson(response, 500, { ok: false, error: "Internal server error." });
+    });
   });
+  server2.on("close", clearResponseTimer);
+  return server2;
 }
 
-// packages/core/scripts/godot-ai-server.ts
+// scripts/godot-ai-server.ts
 import { resolve } from "node:path";
 var port = Number(process.env.DAER_GODOT_AI_PORT || 48152);
 var persistenceFile = process.env.DAER_GODOT_STATE_FILE || resolve(process.cwd(), ".daer", "godot-game-state.json");

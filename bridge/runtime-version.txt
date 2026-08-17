@@ -1,1 +1,1 @@
-daer-bridge-session-v5
+daer-bridge-session-v6

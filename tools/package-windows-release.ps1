@@ -26,7 +26,7 @@ $tsxStorePath = Split-Path $tsxPackagePath -Parent
 $esbuildScript = (Resolve-Path (Join-Path $tsxStorePath 'esbuild\bin\esbuild')).Path
 $bridgeEntry = Join-Path $bridgePath 'bridge-server.mjs'
 $bridgeVersionFile = Join-Path $bridgePath 'runtime-version.txt'
-$bridgeRuntimeVersion = 'daer-bridge-session-v5'
+$bridgeRuntimeVersion = 'daer-bridge-session-v6'
 
 if (Test-Path $outputPath) {
     Remove-Item -LiteralPath $outputPath -Recurse -Force
@@ -65,6 +65,41 @@ finally {
 if (-not (Test-Path $bridgeEntry)) {
     throw 'Bridge bundle does not contain bridge-server.mjs.'
 }
+
+function Assert-ReleaseIsolation([string]$rootPath) {
+    $forbiddenPathFragments = @(
+        'addons\godot_mcp',
+        'addons/godot_mcp',
+        'mcp_runtime_probe.gd',
+        'scripts\test_runner.gd',
+        'scripts/test_runner.gd',
+        'E:\project\daer',
+        'E:/project/daer',
+        'K:\godot\daer',
+        'K:/godot/daer'
+    )
+
+    $files = Get-ChildItem -LiteralPath $rootPath -Recurse -File -Force
+    foreach ($file in $files) {
+        $relative = $file.FullName.Substring($rootPath.Length).TrimStart('\', '/')
+        foreach ($fragment in $forbiddenPathFragments) {
+            if ($relative -like "*$fragment*") {
+                throw "Release artifact contains forbidden development path: $relative"
+            }
+        }
+
+        if ($file.Extension -in @('.pck', '.exe', '.dll')) {
+            $ascii = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($file.FullName))
+            foreach ($fragment in $forbiddenPathFragments) {
+                if ($ascii.Contains($fragment)) {
+                    throw "Release binary contains forbidden development marker: $fragment in $relative"
+                }
+            }
+        }
+    }
+}
+
+Assert-ReleaseIsolation $outputPath
 [IO.File]::WriteAllText(
     $bridgeVersionFile,
     $bridgeRuntimeVersion + [Environment]::NewLine,

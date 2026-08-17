@@ -75,23 +75,23 @@ AIService
 
 | ID | 发现 | 外部优先级 | 本地状态 | 本地证据摘要 | 整改优先级 |
 | --- | --- | --- | --- | --- | --- |
-| R-01 | 胡与强制碰/招并存时删除强制 fallback | P0 | 确认存在 | `game-manager.ts:217-251` 先选全局最高优先级，再把同一玩家动作过滤到相同优先级；`mandatoryAction` 只在过滤后的集合查找 | P0 |
-| R-02 | 过牌后禁吃但未禁胡 | P0 | 确认存在 | `action-handlers.ts:202-205` 检查过牌禁吃；`turn-manager.ts:354-383` 生成胡动作时不检查 `passedPlays`；`game-manager.ts:754-774` 直接胡校验也未防御 | P0 |
-| R-03 | 庄家第 21 张与 20 张爆牌基准冲突 | P0 | 确认存在、规则门禁 | `deck-manager.ts:121-160` 已支持独立 pending card；但 `game-manager.ts:640-648` 又把它加入庄家手牌后直接做爆牌选择；另有 `handleDiscardToBao()` 处理 21→20 | P0 |
-| R-04 | 天胡缺少庄家和开局事实约束 | P1 | 确认存在 | `action-handlers.ts:561` 只判断 `turnCount === 0` 和牌型；`rules-validator.ts:820-823` 不知道庄家身份 | P1 |
-| R-05 | 水上漂用 `turnCount === 1` 代替首次翻山牌 | P1 | 确认存在 | `action-handlers.ts:573` 直接使用回合数推导第一次翻牌 | P1 |
-| R-06 | 响应超时没有进入正式状态机 | P1 | 确认存在 | `ResponseWindow` 只有 `openedAt`；`timeout-handler.ts` 仅被独立测试引用，正式 `GameManager`/Bridge 未接入 | P1，与 R-01 同批设计 |
-| R-07 | RuleProfile/GameConfig 存在死配置和双重事实 | P1 | 确认存在 | `GameConfig` 暴露 `mandatoryPeng`、`mandatoryZhao`、`minHuPoints`、`allowZeroHu`；计分仍读取 `WIN_CONDITIONS` 常量 | P1 |
-| R-08 | 翻牌全过历史缺少 `source: draw` | P1 | 本地已修 | `game-manager.ts:51-82` 已写入 `source: 'draw'`；`response-window-flow.test.ts:184` 有断言 | 关闭，保留回归 |
-| R-09 | meld 基础校验缺少严格张数 | P2 | 确认存在 | `rules-validator.ts:34-38` 对碰/坎/招/垅只判断所有牌相同，不判断 3/4 张 | P2 |
-| R-10 | 固定三人项目仍保留四人运行分支 | P2 | 确认存在 | `GameConfig.playerCount` 仍为 `3 | 4`，存在 `FOUR_PLAYERS`、歇底分支、4 人测试和 3～4 人状态校验 | P2 |
-| D-01 | 正式过牌文档不完整且互相冲突 | P0 | 确认存在 | `luzhou-daer-rules-v2.md` 只写不可再吃；`rule-traceability-matrix.md` 将“过张完整实现”标为完成；Godot 流程方案仍写“仅在放弃吃时记录” | P0，先于代码 |
-| S-01 | localhost Bridge 无鉴权且开放 CORS `*` | P0 | 确认存在 | `godot-ai-runtime-server.ts:74-91,328-342` 对所有路由开放通配 CORS、接受 OPTIONS，未校验认证信息 | P0 |
-| S-02 | Bridge 请求体无大小限制 | P1 | 确认存在 | `readJson()` 无累计字节上限，持续收集后 `Buffer.concat()` | P1 |
-| S-03 | MCP 调试组件进入发布资源 | P2 | 确认存在 | `project.godot` 启用 MCP 插件；`export_presets.cfg` 使用 `all_resources` 且 `exclude_filter` 为空 | P2 |
-| S-04 | 自定义 Bridge 命令经 `cmd.exe /c` | P3 | 确认存在 | `ai_service.gd:145` 直接执行环境变量提供的命令；发布版未显式关闭该入口 | P3 |
-| S-05 | PersistenceService 文件名缺少净化 | P3 | 确认存在 | `save_json()`、`load_json()` 和 `load_replay()` 直接拼接调用方文件名 | P3 |
-| Q-01 | 生产规则固定场景覆盖不足 | P0 | 部分确认 | 已有 core、Bridge、response-window 和 action-guard 测试；但缺少 GUO-002/004、RESP-001/002、正式 deadline、开局爆牌等闭环，Godot headless 仍大量依赖 legacy fixture | P0 测试门禁 |
+| R-01 | 胡与强制碰/招并存时删除强制 fallback | P0 | 本地已修 | `game-manager.ts` 保留选中玩家完整合法动作集合；RESP-001/002/003/007 通过 | 已关闭，保留回归 |
+| R-02 | 过牌后禁吃但未禁胡 | P0 | 本地已修 | `passed-play.ts` 统一约束动作生成与 `GameManager` 直接胡入口；GUO-001～007 通过 | 已关闭，保留回归 |
+| R-03 | 庄家第 21 张与 20 张爆牌基准冲突 | P0 | 本地已修 | `dealerPendingCard` 与基础20张分离；BAO-001～006 和状态验证通过 | 已关闭，保留回归 |
+| R-04 | 天胡缺少庄家和开局事实约束 | P1 | 本地已修 | `opening-facts.ts` 校验庄家、开局子阶段和普通动作数 | 已关闭，保留回归 |
+| R-05 | 水上漂用 `turnCount === 1` 代替首次翻山牌 | P1 | 本地已修 | `GameState.drawOrdinal` 只在真实摸牌时递增；MING-003/004 通过 | 已关闭，保留回归 |
+| R-06 | 响应超时没有进入正式状态机 | P1 | 本地已修 | `ResponseWindow.deadlineAt/timeoutAction`、Bridge timer 和 `/api/game/timeout` 已接入；RESP-004/006/007 通过 | 已关闭，保留回归 |
+| R-07 | RuleProfile/GameConfig 存在死配置和双重事实 | P1 | 本地已修 | `RuleProfile` 成为新局规则快照，状态含 `ruleVersion`/`ruleProfile`；RuleProfile 测试通过 | 已关闭，保留回归 |
+| R-08 | 翻牌全过历史缺少 `source: draw` | P1 | 本地已修 | `DiscardEvent` 统一 source/sourcePlayerIndex/responseWindowId/sequence，保留 source=draw 回归 | 已关闭，保留回归 |
+| R-09 | meld 基础校验缺少严格张数 | P2 | 本地已修 | `RulesValidator.isValidMeld()` 严格约束3/4张；meld-contract 4项通过 | 已关闭，保留回归 |
+| R-10 | 固定三人项目仍保留四人运行分支 | P2 | 本地已修 | 删除四人发牌/歇底常量和状态分支，turn order/validator 固定三人 | 已关闭，保留回归 |
+| D-01 | 正式过牌文档不完整且互相冲突 | P0 | 本地已修 | 四份规则/追踪文档已统一 GUO-01～07、NEVER 和 R-08 状态 | 已关闭，保留回归 |
+| S-01 | localhost Bridge 无鉴权且开放 CORS `*` | P0 | 本地已修 | 256-bit 会话令牌、timing-safe Bearer 校验、无 wildcard CORS/OPTIONS；安全测试通过 | 已关闭，保留回归 |
+| S-02 | Bridge 请求体无大小限制 | P1 | 本地已修 | 实际字节累计、64 KiB 上限、413/400/415 统一错误；Bridge 测试通过 | 已关闭，保留回归 |
+| S-03 | MCP 调试组件进入发布资源 | P2 | 本地已修 | Release preset 排除 MCP/测试/工具/文档；PCK 扫描禁带路径命中 0 项，脚本同时检查正反斜杠 | 已关闭，发布包复核 |
+| S-04 | 自定义 Bridge 命令经 `cmd.exe /c` | P3 | 本地已修 | Release 构建忽略自定义命令和 core workspace，只使用版本匹配 bundled Bridge | 已关闭，发布包复核 |
+| S-05 | PersistenceService 文件名缺少净化 | P3 | 本地已修 | replay ID 限制为 `[A-Za-z0-9_-]{1,64}`，校验 basename 和规范化目录 | 已关闭，Godot 回归通过 |
+| Q-01 | 生产规则固定场景覆盖不足 | P0 | 本地已修，视觉待发布复核 | core 完整测试 240 项通过、1 项明确跳过；GUO/RESP/BAO/MING/meld/三人/Bridge action-guard 均有固定场景，Godot headless 通过 | 发布候选复核 |
 | V-01 | 审计、core、Godot 和 bundle 缺少统一版本基线 | 未列出 | 本地新增发现 | 外部报告称 `main`，本地是脏的 `epic/learned-ai-overhaul`；审计初始时 Godot 无 Git，现已建立独立 `main` 基线；随包 Bridge 只能靠 runtime manifest 判断行为版本 | P0 前置治理 |
 
 ## 6. 关键问题详述
@@ -166,3 +166,9 @@ AIService
 - 不应发布给不受控环境使用，因为本机 Bridge 接口缺少鉴权。
 
 P0 完成定义不是“代码已改”，而是：正式规则、Rule ID、core 实现、动作执行防御、Bridge 集成测试、Godot 展示和版本记录全部一致。
+
+## 9. 当前整改复核（2026-08-18 工作树）
+
+上述审计结论记录的是初始核验状态；当前整改工作树已完成表中 R-01～R-10、D-01、S-01～S-05 的代码和定向测试修复。已验证证据包括：core 类型检查、GUO/RESP/BAO/MING/meld/三人/RuleProfile 定向测试、Bridge 鉴权与输入边界测试、bundled Bridge v2/v6 smoke test，以及 Godot headless `GAME_SERVICE_TESTS_PASSED`。
+
+尚未关闭的发布门禁是：从干净 Git 提交重建 Windows 导出、保存 bundle SHA-256、逐项完成完整跨层回放和视觉联调。故本报告可以将规则/安全发现标记为“实现已修、发布待归档”，不能把当前脏工作树直接视为正式发布版本。

@@ -19,7 +19,6 @@ config/features=PackedStringArray("4.7")
 AppState="*res://scripts/app_state.gd"
 PersistenceService="*res://scripts/persistence_service.gd"
 AIService="*res://scripts/ai_service.gd"
-MCPRuntimeProbe="*uid://bsg12huaf1u5i"
 
 [display]
 
@@ -28,10 +27,6 @@ window/size/viewport_height=720
 window/size/window_width_override=1280
 window/size/window_height_override=720
 window/stretch/mode="canvas_items"
-
-[editor_plugins]
-
-enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")
 
 [input]
 

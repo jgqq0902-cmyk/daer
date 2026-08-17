@@ -13,8 +13,8 @@ const SESSION_RUNTIME_PORT_BASE := 49152
 const SESSION_RUNTIME_PORT_SPAN := 1536
 const SESSION_RUNTIME_PORT_ATTEMPTS := 12
 const RUNTIME_HTTP_TIMEOUT_SECONDS := 3.0
-const PROTOCOL_VERSION := "daer-godot-v1"
-const RUNTIME_VERSION := "daer-bridge-session-v5"
+const PROTOCOL_VERSION := "daer-godot-v2"
+const RUNTIME_VERSION := "daer-bridge-session-v6"
 const BRIDGE_COMMAND_ENV := "DAER_GODOT_BRIDGE_COMMAND"
 const CORE_WORKSPACE_ENV := "DAER_CORE_WORKSPACE"
 const BUNDLED_BRIDGE_RELATIVE_PATH := "bridge/daer-ai-server.cmd"
@@ -35,6 +35,7 @@ var _recovering_runtime := false
 var _runtime_endpoint_occupied := false
 var _runtime_port := 0
 var _runtime_session_id := ""
+var _runtime_auth_token := ""
 var _runtime_parent_pid := 0
 var _startup_restore_checked := false
 var _startup_restore_cancelled := false
@@ -58,6 +59,8 @@ func _ensure_runtime_session() -> void:
     _runtime_parent_pid = OS.get_process_id()
     _runtime_session_id = debug_runtime_session_id_for(_runtime_parent_pid, Time.get_ticks_usec())
     _runtime_port = debug_runtime_port_for_session(_runtime_parent_pid, 0)
+    var crypto := Crypto.new()
+    _runtime_auth_token = crypto.generate_random_bytes(32).hex_encode()
 
 func _warm_runtime() -> void:
     if not await ensure_runtime() or _startup_restore_checked:
@@ -164,6 +167,13 @@ func ensure_runtime() -> bool:
 
 func _runtime_start_command() -> String:
     var configured_command := OS.get_environment(BRIDGE_COMMAND_ENV).strip_edges()
+    if _is_release_build():
+        if not configured_command.is_empty() or not OS.get_environment(CORE_WORKSPACE_ENV).strip_edges().is_empty():
+            push_warning("[daer] Release 构建忽略开发 Bridge 覆盖，使用随包 Bridge。")
+        var bundled_release_bridge := _bundled_bridge_path()
+        if not bundled_release_bridge.is_empty():
+            return _runtime_environment_prefix() + "call \"%s\"" % bundled_release_bridge
+        return ""
     if not configured_command.is_empty():
         return _runtime_environment_prefix() + configured_command
     var core_workspace := OS.get_environment(CORE_WORKSPACE_ENV).strip_edges()
@@ -175,6 +185,9 @@ func _runtime_start_command() -> String:
     if not bundled_bridge.is_empty():
         return _runtime_environment_prefix() + "call \"%s\"" % bundled_bridge
     return ""
+
+func _is_release_build() -> bool:
+    return not OS.has_feature("editor") and not OS.is_debug_build()
 
 func _runtime_environment_prefix() -> String:
     _ensure_runtime_session()
@@ -230,7 +243,7 @@ func debug_runtime_port_for_session(parent_process_id: int, attempt: int = 0) ->
     return SESSION_RUNTIME_PORT_BASE + (abs(parent_process_id) + maxi(attempt, 0)) % SESSION_RUNTIME_PORT_SPAN
 
 func debug_runtime_environment_prefix_for_session(port: int, session_id: String, parent_process_id: int) -> String:
-    return "set \"DAER_GODOT_AI_PORT=%d\" && set \"DAER_GODOT_SESSION_ID=%s\" && set \"DAER_GODOT_PARENT_PID=%d\" && set \"DAER_GODOT_STATE_FILE=%%LOCALAPPDATA%%\\DaerTraining\\bridge\\godot-game-state.json\" && " % [port, session_id, parent_process_id]
+    return "set \"DAER_GODOT_AI_PORT=%d\" && set \"DAER_GODOT_SESSION_ID=%s\" && set \"DAER_GODOT_PARENT_PID=%d\" && set \"DAER_BRIDGE_TOKEN=%s\" && set \"DAER_GODOT_STATE_FILE=%%LOCALAPPDATA%%\\DaerTraining\\bridge\\godot-game-state.json\" && " % [port, session_id, parent_process_id, _runtime_auth_token]
 
 func debug_runtime_response_matches_session(response: Dictionary, session_id: String) -> bool:
     return _is_runtime_version_compatible(response) and str(response.get("sessionId", "")) == session_id
@@ -424,7 +437,7 @@ func _save_current_replay() -> void:
 func _request(path: String, method: HTTPClient.Method, payload: Dictionary = {}, update_connection: bool = true, report_failure: bool = true) -> Dictionary:
     await _acquire_http_request()
     _last_http_status_code = 0
-    var headers := PackedStringArray(["Content-Type: application/json"])
+    var headers := PackedStringArray(["Content-Type: application/json", "Authorization: Bearer %s" % _runtime_auth_token])
     var body := "" if method == HTTPClient.METHOD_GET else JSON.stringify(payload)
     var result := http.request(_runtime_base_url() + path, headers, method, body)
     if result != OK:

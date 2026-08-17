@@ -115,6 +115,7 @@ func _state_awaiting_human(state: Dictionary) -> bool:
 func _ready() -> void:
 	_load_card_brush_font()
 	_build_shell()
+	_mount_headless_test_runner()
 	_free_hand_game_generation = AIService.game_generation
 	AIService.state_received.connect(_on_state_received)
 	AIService.advice_received.connect(_on_advice_received)
@@ -127,6 +128,21 @@ func _ready() -> void:
 		show_home()
 	else:
 		_on_state_received(AIService.latest_state)
+
+func _mount_headless_test_runner() -> void:
+	if "--test" not in OS.get_cmdline_user_args():
+		return
+	# Keep the test-only script out of exported scenes while preserving the
+	# existing headless test entry point for development builds.
+	var runner_script_path := "res://" + "scripts/" + "test_" + "runner.gd"
+	var runner_script = load(runner_script_path)
+	if runner_script == null:
+		push_error("Headless test runner is unavailable: " + runner_script_path)
+		return
+	var runner := Node.new()
+	runner.name = "TestRunner"
+	runner.set_script(runner_script)
+	add_child(runner)
 
 func _process(_delta: float) -> void:
 	if page != "game" or AIService.latest_state.is_empty():
