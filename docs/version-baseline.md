@@ -7,7 +7,7 @@
 
 | 层级 | 工作区 | 分支 | 提交 | 远端 | 工作树 |
 | --- | --- | --- | --- | --- | --- |
-| Godot 客户端与随包 Bridge | `K:\godot\daer` | `codex/audit-remediation-p0` | `f46b3b427ab4ca56846c38784f2ec9ed9fb5decd` | `https://github.com/jgqq0902-cmyk/daer.git` | 已提交 |
+| Godot 客户端与随包 Bridge | `K:\godot\daer` | `codex/audit-remediation-p0` | `ae584adab58836d8efa9e09111cb99beacd7466e` | `https://github.com/jgqq0902-cmyk/daer.git` | 已提交 |
 | core 与开发 Bridge 源码 | `E:\project\daer` | `codex/audit-remediation-p0` | `d4f74fae00364f85950dde390be261c2dcdd5445` | 未配置 | 脏工作树：51 个已修改、39 个未跟踪项（采集时） |
 
 `E:\project\daer` 的现有改动属于用户工作内容，本次整改不执行清理、重置、强制覆盖或批量暂存。core 当前没有远端，因此 core 提交只能先通过本地分支和本基线记录追踪。
@@ -24,7 +24,7 @@
 
 已确认 `runtime-version.txt` 与 Godot/Bridge 常量一致，且 K 包内 bundle 已由当前 core 源码重建。规则版本、协议版本、运行版本和回放 schema 的升级必须在同一整改提交中同步，禁止只改其中一层。
 
-当前 K 工作区已提交到 `f46b3b427ab4ca56846c38784f2ec9ed9fb5decd`，该提交包含与当前 core 工作树构建出的随包 Bridge。E:\project\daer 的 core 仍保留用户未提交改动，故 core commit 仍以初始基线记录为定位依据，不能误称为本次整改的干净 core 提交。
+当前 K 工作区的整改代码和随包 Bridge 已提交到 `ae584adab58836d8efa9e09111cb99beacd7466e`。E:\project\daer 的 core 仍保留用户未提交改动，故 core commit 仍以初始基线记录为定位依据，不能误称为本次整改的干净 core 提交。
 
 ## 发布候选哈希
 
