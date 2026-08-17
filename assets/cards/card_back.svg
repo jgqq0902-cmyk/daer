@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="300" viewBox="0 0 180 300">
+<rect x="2" y="2" width="176" height="296" rx="12" fill="#17482f" stroke="#d5a94b" stroke-width="4"/>
+<rect x="12" y="12" width="156" height="276" rx="8" fill="none" stroke="#73c19a" stroke-width="2"/>
+<path d="M26 36h128M26 264h128M36 26v248M144 26v248" stroke="#d5a94b" stroke-width="2" opacity=".55"/>
+<text x="90" y="164" text-anchor="middle" font-family="serif" font-size="76" font-weight="bold" fill="#e7b95a">大</text>
+</svg>

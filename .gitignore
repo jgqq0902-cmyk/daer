@@ -1,0 +1,22 @@
+# Godot editor/import caches
+.godot/
+**/.godot/
+*.import
+
+# Codex/GDMCP local state and test logs
+.codex-appdata/
+.codex-user-data/
+.codex-*.log
+.gdmcp/
+**/.gdmcp/
+.learnings/
+
+# Generated builds, exports, and local reference applications
+build/
+guandan/
+*.apk
+*.zip
+
+# Local vendored MCP development checkout and compiled toolchains
+tools/Godot-MCP-Native/
+

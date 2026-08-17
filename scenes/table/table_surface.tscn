@@ -1,0 +1,68 @@
+[gd_scene format=3 uid="uid://c48q3gk0ls0pk"]
+
+[node name="TableSurface" type="Control" unique_id=20476006]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="GameNavigation" type="HBoxContainer" parent="." unique_id=1254949299]
+z_index = 40
+layout_mode = 0
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -126.0
+offset_top = 6.0
+offset_right = -8.0
+offset_bottom = 38.0
+grow_horizontal = 0
+theme_override_constants/separation = 4
+
+[node name="BackButton" type="Button" parent="GameNavigation" unique_id=1482031065]
+custom_minimum_size = Vector2(54, 28)
+layout_mode = 2
+text = "返回"
+
+[node name="SettingsButton" type="Button" parent="GameNavigation" unique_id=911921620]
+custom_minimum_size = Vector2(54, 28)
+layout_mode = 2
+text = "设置"
+
+[node name="OpponentLeftSlot" type="Control" parent="." unique_id=1363613402]
+anchors_preset = 0
+offset_left = 14.0
+offset_top = 46.0
+offset_right = 314.0
+offset_bottom = 376.0
+
+[node name="OpponentRightSlot" type="Control" parent="." unique_id=1369643874]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -322.0
+offset_top = 46.0
+offset_right = -22.0
+offset_bottom = 376.0
+grow_horizontal = 0
+
+[node name="CenterSlot" type="Control" parent="." unique_id=1374862193]
+anchors_preset = 0
+anchor_right = 1.0
+anchor_bottom = 0.57
+offset_left = 250.0
+offset_right = -250.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="PlayerAreaSlot" type="Control" parent="." unique_id=2133822202]
+layout_mode = 1
+anchor_top = 0.58
+anchor_right = 1.0
+anchor_bottom = 0.99
+offset_left = 149.0
+offset_right = -149.0
+offset_bottom = 1.2000122
