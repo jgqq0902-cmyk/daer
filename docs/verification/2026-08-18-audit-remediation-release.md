@@ -11,7 +11,7 @@
 | 检查 | 结果 |
 | --- | --- |
 | `pnpm --dir E:\project\daer\packages\core run type-check` | 通过 |
-| 完整 Vitest | 31 文件通过、1 文件明确跳过；241 通过、1 跳过 |
+| 完整 Vitest | 31 文件通过、1 文件明确跳过；242 通过、1 跳过；`TimeoutHandler` 仅委托正式响应窗口状态机 |
 | Godot `--headless --path K:\godot\daer -- --test` | `GAME_SERVICE_TESTS_PASSED`；仅既有 RID/ObjectDB 泄漏告警 |
 | `tools/package-windows-release.ps1 -CoreWorkspace E:\project\daer` | 退出码 0，生成 `DaerTraining.exe`、PCK 和自足 Bridge |
 | `tools/verify-bundled-bridge.ps1` | v2/v6、3 玩家、ruleVersion、401、OPTIONS 404、413、无 wildcard CORS 全通过 |

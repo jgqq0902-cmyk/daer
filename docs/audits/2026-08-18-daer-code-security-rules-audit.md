@@ -91,7 +91,7 @@ AIService
 | S-03 | MCP 调试组件进入发布资源 | P2 | 本地已修 | Release preset 排除 MCP/测试/工具/文档；PCK 扫描禁带路径命中 0 项，脚本同时检查正反斜杠 | 已关闭，发布包复核 |
 | S-04 | 自定义 Bridge 命令经 `cmd.exe /c` | P3 | 本地已修 | Release 构建忽略自定义命令和 core workspace，只使用版本匹配 bundled Bridge | 已关闭，发布包复核 |
 | S-05 | PersistenceService 文件名缺少净化 | P3 | 本地已修 | replay ID 限制为 `[A-Za-z0-9_-]{1,64}`，校验 basename 和规范化目录 | 已关闭，Godot 回归通过 |
-| Q-01 | 生产规则固定场景覆盖不足 | P0 | 本地已验证关闭 | core 完整测试 241 项通过、1 项明确跳过；GUO/RESP/BAO/MING/meld/三人/RuleProfile/Bridge 均有固定场景，Godot headless 与最终 Windows Release 冷启动通过 | 已关闭，保留回归 |
+| Q-01 | 生产规则固定场景覆盖不足 | P0 | 本地已验证关闭 | core 完整测试 242 项通过、1 项明确跳过；GUO/RESP/BAO/MING/meld/三人/RuleProfile/Bridge 均有固定场景，Godot headless 与最终 Windows Release 冷启动通过 | 已关闭，保留回归 |
 | V-01 | 审计、core、Godot 和 bundle 缺少统一版本基线 | 未列出 | 本地已修 | K 已建立独立 Git 基线并提交最终 bundle；E core 的用户脏工作树和构建来源已在版本清单中显式记录，未伪装成干净 core commit | 已关闭，持续治理 |
 
 ## 6. 关键问题详述
@@ -169,6 +169,6 @@ P0 完成定义不是“代码已改”，而是：正式规则、Rule ID、core
 
 ## 9. 当前整改复核（2026-08-18 最终验收）
 
-上述审计结论记录的是初始核验状态；当前整改已完成表中 R-01～R-10、D-01、S-01～S-05 的代码、文档、定向测试和发布收口。RuleProfile 的计分阈值已从旧静态 `WIN_CONDITIONS` 移除，validator、GameManager、AI 分析和随包 Bridge 使用同一局 profile。最终证据包括：core 类型检查、完整 Vitest（241 通过/1 跳过）、GUO/RESP/BAO/MING/meld/三人/RuleProfile 定向测试、Bridge 鉴权与输入边界测试、bundled Bridge v2/v6 smoke、禁带路径扫描和 Godot headless `GAME_SERVICE_TESTS_PASSED`。
+上述审计结论记录的是初始核验状态；当前整改已完成表中 R-01～R-10、D-01、S-01～S-05 的代码、文档、定向测试和发布收口。RuleProfile 的计分阈值已从旧静态 `WIN_CONDITIONS` 移除，validator、GameManager、AI 分析和随包 Bridge 使用同一局 profile。最终证据包括：core 类型检查、完整 Vitest（242 通过/1 跳过）、`TimeoutHandler` 委托正式响应窗口状态机的回归测试、GUO/RESP/BAO/MING/meld/三人/RuleProfile 定向测试、Bridge 鉴权与输入边界测试、bundled Bridge v2/v6 smoke、禁带路径扫描和 Godot headless `GAME_SERVICE_TESTS_PASSED`。
 
 Windows 4.7.1 完整导出已成功，最终 EXE/PCK/Bridge/Node 哈希和冷启动记录见 [`../verification/2026-08-18-audit-remediation-release.md`](../verification/2026-08-18-audit-remediation-release.md)。实机 Release 启动未设置开发覆盖、不依赖 pnpm/tsx，创建三人新局；关闭后随包 Bridge 进程清零，重启可恢复并再次开新局。E core 仍保留用户脏工作树，这是有意的版本边界，不影响 K 仓库和随包产物的 Git 追踪。
