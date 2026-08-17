@@ -307,8 +307,6 @@ function getSpecialSequenceHu(ranks, size) {
   return null;
 }
 var WIN_CONDITIONS = {
-  MIN_HU_POINTS: 10,
-  ALLOW_ZERO_HU: true,
   REQUIRED_MELDS: 7,
   HEAVENLY_WIN_CONDITIONS: {
     threeQuadruples: 3,
@@ -400,15 +398,15 @@ function getBaseScoreByHu(totalHuPoints) {
   }
   return BASE_SCORE_TABLE.FORTY_PLUS;
 }
-function checkWinCondition(totalHuPoints, groupCount, pairCount, isZeroHu) {
+function checkWinCondition(totalHuPoints, groupCount, pairCount, isZeroHu, profile) {
   const validStructure = groupCount === WIN_CONDITIONS.REQUIRED_MELDS && pairCount === 0 || groupCount === WIN_CONDITIONS.REQUIRED_MELDS - 1 && pairCount === 1;
   if (!validStructure) {
     return false;
   }
   if (isZeroHu) {
-    return WIN_CONDITIONS.ALLOW_ZERO_HU && totalHuPoints === 0;
+    return profile.allowZeroHu && totalHuPoints === 0;
   }
-  return totalHuPoints >= WIN_CONDITIONS.MIN_HU_POINTS && validStructure;
+  return totalHuPoints >= profile.minHuPoints && validStructure;
 }
 var EIGHT_BLOCKS_CONFIG = {
   REQUIRED_COUNT: 2,
@@ -1084,10 +1082,10 @@ var ScoreCalculator = class {
   /**
    * 检查是否胡牌
    */
-  checkCanWin(melds, totalHuPoints, isZeroHu) {
+  checkCanWin(melds, totalHuPoints, isZeroHu, profile = DEFAULT_RULE_PROFILE) {
     const pairCount = melds.filter((m) => m.type === "pair" /* PAIR */).length;
     const groupCount = melds.length - pairCount;
-    return checkWinCondition(totalHuPoints, groupCount, pairCount, isZeroHu);
+    return checkWinCondition(totalHuPoints, groupCount, pairCount, isZeroHu, profile);
   }
   /**
    * 计算听牌（可以胡哪些牌）
@@ -1486,7 +1484,7 @@ var RulesValidator = class {
     const sameCards = handCards.filter((c) => CardComparator.isSame(c, targetCard));
     return sameCards.length >= 3;
   }
-  getBaoTingCards(handCards, melds = []) {
+  getBaoTingCards(handCards, melds = [], profile) {
     const fullDeck = CardFactory.createDeck();
     const existingCounts = /* @__PURE__ */ new Map();
     for (const card of [...handCards, ...melds.flatMap((meld) => meld.cards || [])]) {
@@ -1501,31 +1499,31 @@ var RulesValidator = class {
       }
       candidates.set(key, card);
     }
-    return Array.from(candidates.values()).filter((card) => this.canHu(handCards, melds, card, "draw") || this.getHuChiOptions(handCards, melds, card).length > 0);
+    return Array.from(candidates.values()).filter((card) => this.canHu(handCards, melds, card, "draw", profile) || this.getHuChiOptions(handCards, melds, card, profile).length > 0);
   }
-  getBaoDiscardCandidates(handCards, melds = []) {
+  getBaoDiscardCandidates(handCards, melds = [], profile) {
     return handCards.map((discardCard) => {
       const remainingCards = handCards.filter((card) => card.id !== discardCard.id);
       return {
         discardCard,
-        tingCards: this.getBaoTingCards(remainingCards, melds)
+        tingCards: this.getBaoTingCards(remainingCards, melds, profile)
       };
     }).filter((candidate) => candidate.tingCards.length > 0);
   }
   /**
    * 检查是否可以胡牌
    */
-  canHu(handCards, melds, activeCard, activeCardSource) {
+  canHu(handCards, melds, activeCard, activeCardSource, profile) {
     const effectiveHandCards = activeCard ? [...handCards, activeCard] : handCards;
-    const winningHandMelds = this.findWinningHandMelds(effectiveHandCards, melds, activeCard, activeCardSource);
+    const winningHandMelds = this.findWinningHandMelds(effectiveHandCards, melds, activeCard, activeCardSource, profile);
     if (!winningHandMelds) return false;
     const allMelds = [...melds, ...winningHandMelds];
     if (!this.isValidHuStructure(allMelds)) return false;
     const { totalHuPoints } = this.scoreCalculator.calculateTotalScore(allMelds);
     const isZeroHu = totalHuPoints === 0;
-    return this.scoreCalculator.checkCanWin(allMelds, totalHuPoints, isZeroHu);
+    return this.scoreCalculator.checkCanWin(allMelds, totalHuPoints, isZeroHu, profile);
   }
-  getHuChiOptions(handCards, melds, activeCard) {
+  getHuChiOptions(handCards, melds, activeCard, profile) {
     if (!activeCard) {
       return [];
     }
@@ -1544,7 +1542,7 @@ var RulesValidator = class {
       };
       mainMeld.huPoints = this.scoreCalculator.calculateMeldHuPoints(mainMeld);
       const landedMelds = [...melds, mainMeld, ...option.additionalMelds];
-      const winningHandMelds = this.findWinningHandMelds(option.remainingCards, landedMelds);
+      const winningHandMelds = this.findWinningHandMelds(option.remainingCards, landedMelds, void 0, void 0, profile);
       if (!winningHandMelds) {
         return false;
       }
@@ -1554,7 +1552,7 @@ var RulesValidator = class {
       }
       const { totalHuPoints } = this.scoreCalculator.calculateTotalScore(allMelds);
       const isZeroHu = totalHuPoints === 0;
-      return this.scoreCalculator.checkCanWin(allMelds, totalHuPoints, isZeroHu);
+      return this.scoreCalculator.checkCanWin(allMelds, totalHuPoints, isZeroHu, profile);
     });
   }
   /**
@@ -1596,7 +1594,7 @@ var RulesValidator = class {
     }
     return true;
   }
-  findWinningHandMelds(handCards, tableMelds, activeCard, _activeCardSource) {
+  findWinningHandMelds(handCards, tableMelds, activeCard, _activeCardSource, profile) {
     const tablePairCount = tableMelds.filter((m) => m.type === "pair" /* PAIR */).length;
     const tableGroupCount = tableMelds.length - tablePairCount;
     if (tablePairCount > 1 || tableGroupCount > 7) return null;
@@ -1660,7 +1658,7 @@ var RulesValidator = class {
         }
         const { totalHuPoints } = this.scoreCalculator.calculateTotalScore(all);
         const isZeroHu = totalHuPoints === 0;
-        if (this.scoreCalculator.checkCanWin(all, totalHuPoints, isZeroHu)) {
+        if (this.scoreCalculator.checkCanWin(all, totalHuPoints, isZeroHu, profile)) {
           return acc;
         }
         return null;
@@ -1747,7 +1745,8 @@ var RulesValidator = class {
       currentPlayer.cards,
       currentPlayer.melds,
       currentCard,
-      state.pendingCardSource
+      state.pendingCardSource,
+      state.ruleProfile
     );
     if (canHuNow) {
       return actions;
@@ -1786,9 +1785,9 @@ var RulesValidator = class {
   /**
    * 检查是否可以胜利（供胜率计算器使用）
    */
-  checkCanWin(remainingCards, melds, totalHuPoints) {
+  checkCanWin(remainingCards, melds, totalHuPoints, profile) {
     const isZeroHu = totalHuPoints === 0;
-    return this.scoreCalculator.checkCanWin(melds, totalHuPoints, isZeroHu);
+    return this.scoreCalculator.checkCanWin(melds, totalHuPoints, isZeroHu, profile);
   }
   /**
    * 检查是否为天胡
@@ -2204,7 +2203,7 @@ var TurnManager = class {
     const mandatoryActions = this.rulesValidator.getMandatoryActions(state);
     if (mandatoryActions.length > 0) {
       const activeCard = state.discardPile.lastDiscard;
-      const canChooseHu = state.phase === "response_collecting" /* RESPONSE_COLLECTING */ && !!activeCard && (canClaimActiveCard(state, state.currentPlayerIndex, activeCard, "hu").allowed && (this.rulesValidator.canHu(currentPlayer.cards, currentPlayer.melds, activeCard, state.pendingCardSource) || this.rulesValidator.getHuChiOptions(currentPlayer.cards, currentPlayer.melds, activeCard).length > 0));
+      const canChooseHu = state.phase === "response_collecting" /* RESPONSE_COLLECTING */ && !!activeCard && (canClaimActiveCard(state, state.currentPlayerIndex, activeCard, "hu").allowed && (this.rulesValidator.canHu(currentPlayer.cards, currentPlayer.melds, activeCard, state.pendingCardSource, state.ruleProfile) || this.rulesValidator.getHuChiOptions(currentPlayer.cards, currentPlayer.melds, activeCard, state.ruleProfile).length > 0));
       if (!canChooseHu) return mandatoryActions;
     }
     const addDiscardActions = () => {
@@ -2270,7 +2269,7 @@ var TurnManager = class {
           description: "\u7206\u540E\u4E0D\u51FA\u724C"
         });
       } else {
-        const dealerDiscardBaoCandidates = currentPlayer.isDealer && currentPlayer.cards.length >= 21 ? this.rulesValidator.getBaoDiscardCandidates(currentPlayer.cards, currentPlayer.melds) : [];
+        const dealerDiscardBaoCandidates = currentPlayer.isDealer && currentPlayer.cards.length >= 21 ? this.rulesValidator.getBaoDiscardCandidates(currentPlayer.cards, currentPlayer.melds, state.ruleProfile) : [];
         for (const candidate of dealerDiscardBaoCandidates) {
           const preview = candidate.tingCards.slice(0, 4).map((card) => card.rank).join("\u3001");
           actions.push({
@@ -2333,9 +2332,10 @@ var TurnManager = class {
       currentPlayer.cards,
       currentPlayer.melds,
       huActiveCard,
-      state.pendingCardSource
+      state.pendingCardSource,
+      state.ruleProfile
     );
-    const huChiOptions = canHuBySource && canClaimHu ? this.rulesValidator.getHuChiOptions(currentPlayer.cards, currentPlayer.melds, huActiveCard) : [];
+    const huChiOptions = canHuBySource && canClaimHu ? this.rulesValidator.getHuChiOptions(currentPlayer.cards, currentPlayer.melds, huActiveCard, state.ruleProfile) : [];
     if (huViaDirect || huChiOptions.length > 0) {
       actions.push({
         type: "hu",
@@ -2774,7 +2774,7 @@ var ActionHandlers = class {
     let effectiveHandCards = activeCard ? [...player.cards, activeCard] : player.cards;
     let landedMelds = [...player.melds];
     if (activeCard) {
-      const huChiOptions = this.rulesValidator.getHuChiOptions(player.cards, player.melds, activeCard);
+      const huChiOptions = this.rulesValidator.getHuChiOptions(player.cards, player.melds, activeCard, state.ruleProfile);
       const resolvedHuOption = huOptionId ? huChiOptions.find((option) => option.id === huOptionId) : huChiOptions[0];
       if (resolvedHuOption) {
         const mainMeldType = this.rulesValidator.detectChiMeldType(resolvedHuOption.mainMeldCards);
@@ -2797,7 +2797,8 @@ var ActionHandlers = class {
       effectiveHandCards,
       landedMelds,
       activeCard,
-      state.pendingCardSource
+      state.pendingCardSource,
+      state.ruleProfile
     );
     if (!winningHandMelds) {
       return state;
@@ -3310,7 +3311,7 @@ var GameManager = class {
   }
   prepareBaoSelection(players) {
     const preparedPlayers = players.map((player) => {
-      const baoTingCards = this.rulesValidator.getBaoTingCards(player.cards, player.melds);
+      const baoTingCards = this.rulesValidator.getBaoTingCards(player.cards, player.melds, this.currentConfig);
       return {
         ...player,
         isBao: false,
@@ -3445,7 +3446,7 @@ var GameManager = class {
       return state;
     }
     const remainingCards = player.cards.filter((card) => card.id !== matchedCard.id);
-    const tingCards = this.rulesValidator.getBaoTingCards(remainingCards, player.melds);
+    const tingCards = this.rulesValidator.getBaoTingCards(remainingCards, player.melds, state.ruleProfile);
     if (tingCards.length === 0) {
       return state;
     }
@@ -3634,8 +3635,9 @@ var GameManager = class {
             current.cards,
             current.melds,
             huActiveCard,
-            newState.pendingCardSource
-          ) || this.rulesValidator.getHuChiOptions(current.cards, current.melds, huActiveCard).length > 0);
+            newState.pendingCardSource,
+            newState.ruleProfile
+          ) || this.rulesValidator.getHuChiOptions(current.cards, current.melds, huActiveCard, newState.ruleProfile).length > 0);
           if (!canHuNow) {
             return {
               ...newState,
@@ -5987,8 +5989,14 @@ var AIAnalyzer = class {
         const code = this.formatCardCode(virtualCard);
         const remaining = Math.max(0, 4 - (visibleCounts.get(code) || 0));
         if (remaining <= 0) continue;
-        if (!this.rulesValidator.canHu(handCards, melds, virtualCard, "draw")) continue;
-        const winningHandMelds = this.rulesValidator.findWinningHandMelds([...handCards, virtualCard], melds, virtualCard, "draw");
+        if (!this.rulesValidator.canHu(handCards, melds, virtualCard, "draw", gameState.ruleProfile)) continue;
+        const winningHandMelds = this.rulesValidator.findWinningHandMelds(
+          [...handCards, virtualCard],
+          melds,
+          virtualCard,
+          "draw",
+          gameState.ruleProfile
+        );
         if (!winningHandMelds) continue;
         const scoreResult = this.scoreCalculator.calculateTotalScore([...melds, ...winningHandMelds], {
           winType: "self_draw"
