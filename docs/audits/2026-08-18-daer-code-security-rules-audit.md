@@ -24,7 +24,7 @@
 
 - core/Bridge 源码：`E:\project\daer`
 - Godot 重构工作区：`K:\godot\daer`
-- core 当前分支：`epic/learned-ai-overhaul`
+- core 当前分支：`codex/audit-remediation-p0`
 - core 当前 HEAD：`d4f74fae00364f85950dde390be261c2dcdd5445`
 - core 工作树：存在大量已修改和未跟踪文件，不能视为可复现的干净发布基线
 - Godot 工作区：已于 2026-08-18 建立独立 Git 仓库，当前 `main` 提交为 `662f535`；由于仍与 core 分离，尚未建立两者提交的一一对应关系
@@ -42,7 +42,7 @@
 5. 玩家本来没有吃牌资格或没有合法吃牌方案时，系统推进不形成过牌。
 6. 当前正式口径按整局有效处理，即 `guoZhangClearPolicy = NEVER`；如需改变生命周期，必须先变更规则版本。
 
-## 4. 总体结论
+## 4. 总体结论（初始核验记录）
 
 项目分层方向正确：
 
@@ -81,7 +81,7 @@ AIService
 | R-04 | 天胡缺少庄家和开局事实约束 | P1 | 本地已修 | `opening-facts.ts` 校验庄家、开局子阶段和普通动作数 | 已关闭，保留回归 |
 | R-05 | 水上漂用 `turnCount === 1` 代替首次翻山牌 | P1 | 本地已修 | `GameState.drawOrdinal` 只在真实摸牌时递增；MING-003/004 通过 | 已关闭，保留回归 |
 | R-06 | 响应超时没有进入正式状态机 | P1 | 本地已修 | `ResponseWindow.deadlineAt/timeoutAction`、Bridge timer 和 `/api/game/timeout` 已接入；RESP-004/006/007 通过 | 已关闭，保留回归 |
-| R-07 | RuleProfile/GameConfig 存在死配置和双重事实 | P1 | 本地已修 | `RuleProfile` 成为新局规则快照，状态含 `ruleVersion`/`ruleProfile`；RuleProfile 测试通过 | 已关闭，保留回归 |
+| R-07 | RuleProfile/GameConfig 存在死配置和双重事实 | P1 | 本地已修 | `RuleProfile` 成为新局规则快照；validator、计分器和 AI 分析均读取快照，旧 `WIN_CONDITIONS` 可变字段已移除；RuleProfile 测试通过 | 已关闭，保留回归 |
 | R-08 | 翻牌全过历史缺少 `source: draw` | P1 | 本地已修 | `DiscardEvent` 统一 source/sourcePlayerIndex/responseWindowId/sequence，保留 source=draw 回归 | 已关闭，保留回归 |
 | R-09 | meld 基础校验缺少严格张数 | P2 | 本地已修 | `RulesValidator.isValidMeld()` 严格约束3/4张；meld-contract 4项通过 | 已关闭，保留回归 |
 | R-10 | 固定三人项目仍保留四人运行分支 | P2 | 本地已修 | 删除四人发牌/歇底常量和状态分支，turn order/validator 固定三人 | 已关闭，保留回归 |
@@ -91,8 +91,8 @@ AIService
 | S-03 | MCP 调试组件进入发布资源 | P2 | 本地已修 | Release preset 排除 MCP/测试/工具/文档；PCK 扫描禁带路径命中 0 项，脚本同时检查正反斜杠 | 已关闭，发布包复核 |
 | S-04 | 自定义 Bridge 命令经 `cmd.exe /c` | P3 | 本地已修 | Release 构建忽略自定义命令和 core workspace，只使用版本匹配 bundled Bridge | 已关闭，发布包复核 |
 | S-05 | PersistenceService 文件名缺少净化 | P3 | 本地已修 | replay ID 限制为 `[A-Za-z0-9_-]{1,64}`，校验 basename 和规范化目录 | 已关闭，Godot 回归通过 |
-| Q-01 | 生产规则固定场景覆盖不足 | P0 | 本地已修，视觉待发布复核 | core 完整测试 240 项通过、1 项明确跳过；GUO/RESP/BAO/MING/meld/三人/Bridge action-guard 均有固定场景，Godot headless 通过 | 发布候选复核 |
-| V-01 | 审计、core、Godot 和 bundle 缺少统一版本基线 | 未列出 | 本地新增发现 | 外部报告称 `main`，本地是脏的 `epic/learned-ai-overhaul`；审计初始时 Godot 无 Git，现已建立独立 `main` 基线；随包 Bridge 只能靠 runtime manifest 判断行为版本 | P0 前置治理 |
+| Q-01 | 生产规则固定场景覆盖不足 | P0 | 本地已验证关闭 | core 完整测试 241 项通过、1 项明确跳过；GUO/RESP/BAO/MING/meld/三人/RuleProfile/Bridge 均有固定场景，Godot headless 与最终 Windows Release 冷启动通过 | 已关闭，保留回归 |
+| V-01 | 审计、core、Godot 和 bundle 缺少统一版本基线 | 未列出 | 本地已修 | K 已建立独立 Git 基线并提交最终 bundle；E core 的用户脏工作树和构建来源已在版本清单中显式记录，未伪装成干净 core commit | 已关闭，持续治理 |
 
 ## 6. 关键问题详述
 
@@ -167,8 +167,8 @@ AIService
 
 P0 完成定义不是“代码已改”，而是：正式规则、Rule ID、core 实现、动作执行防御、Bridge 集成测试、Godot 展示和版本记录全部一致。
 
-## 9. 当前整改复核（2026-08-18 工作树）
+## 9. 当前整改复核（2026-08-18 最终验收）
 
-上述审计结论记录的是初始核验状态；当前整改工作树已完成表中 R-01～R-10、D-01、S-01～S-05 的代码和定向测试修复。已验证证据包括：core 类型检查、GUO/RESP/BAO/MING/meld/三人/RuleProfile 定向测试、Bridge 鉴权与输入边界测试、bundled Bridge v2/v6 smoke test，以及 Godot headless `GAME_SERVICE_TESTS_PASSED`。
+上述审计结论记录的是初始核验状态；当前整改已完成表中 R-01～R-10、D-01、S-01～S-05 的代码、文档、定向测试和发布收口。RuleProfile 的计分阈值已从旧静态 `WIN_CONDITIONS` 移除，validator、GameManager、AI 分析和随包 Bridge 使用同一局 profile。最终证据包括：core 类型检查、完整 Vitest（241 通过/1 跳过）、GUO/RESP/BAO/MING/meld/三人/RuleProfile 定向测试、Bridge 鉴权与输入边界测试、bundled Bridge v2/v6 smoke、禁带路径扫描和 Godot headless `GAME_SERVICE_TESTS_PASSED`。
 
-尚未关闭的发布门禁是：从干净 Git 提交重建 Windows 导出、保存 bundle SHA-256、逐项完成完整跨层回放和视觉联调。故本报告可以将规则/安全发现标记为“实现已修、发布待归档”，不能把当前脏工作树直接视为正式发布版本。
+Windows 4.7.1 完整导出已成功，最终 EXE/PCK/Bridge/Node 哈希和冷启动记录见 [`../verification/2026-08-18-audit-remediation-release.md`](../verification/2026-08-18-audit-remediation-release.md)。实机 Release 启动未设置开发覆盖、不依赖 pnpm/tsx，创建三人新局；关闭后随包 Bridge 进程清零，重启可恢复并再次开新局。E core 仍保留用户脏工作树，这是有意的版本边界，不影响 K 仓库和随包产物的 Git 追踪。

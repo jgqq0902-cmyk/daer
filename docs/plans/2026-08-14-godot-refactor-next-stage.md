@@ -2,6 +2,8 @@
 
 > **2026-08-15 更正：** 运行中的固定牌局已证明多玩家响应调度未从原 Web 前端完整迁入 Bridge/core；“Godot 三人局、响应主链路已完成”的历史结论被新的运行证据推翻。规则流程当前按 P0 未闭环处理，修订方案见 `docs/plans/2026-08-15-game-flow-rules-completion.md`。在该方案的固定响应 fixture 全部通过前，不进入本文件的发布候选验收。
 
+> **2026-08-18 收口：** 上述更正和早期未完成表是历史审计记录；最新状态以 `docs/plans/2026-08-18-audit-remediation-plan.md` 与 `docs/verification/2026-08-18-audit-remediation-release.md` 为准。规则、Bridge 安全、完整 Windows 导出和 Release 冷启动门禁现已通过。
+
 > **For Codex:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** 将 Godot 重构从“主要功能已迁移”推进到“可重复验收、可独立导出、可交付”的 Windows 发布候选。
@@ -20,9 +22,9 @@
 | Godot 三人局、牌桌、响应、AI、回放与恢复 | 已完成主链路 | `--test` 输出 `GAME_SERVICE_TESTS_PASSED`；架构文档已有 64 项实施/验收记录 |
 | 新手牌布局、暗搭子、自由拖动与中心出牌 | 已实现，待最新运行时视觉复验 | headless validator 通过；本轮未连接编辑器/MCP，未产生新的截图证据 |
 | Bridge 独立 sidecar | 已完成 | `build/bridge-*-check/bridge` 包含 Node、bundle 与启动脚本；既有独立健康检查记录 |
-| Windows 完整导出 | 未完成，P0 | 本机 export templates 数量为 0；只有 `-SkipGodotExport` 产物 |
+| Windows 完整导出 | 已完成 | 已安装 Godot 4.7.1 templates；完整 EXE/PCK/Bridge 打包与禁带路径扫描通过 |
 | 实时编辑器观测 | 本轮未执行 | 无 Godot 进程、无 9080 监听，gdmcp 返回 `SERVICE_UNREACHABLE` |
-| 源码可审计性 | 有风险 | `K:\godot\daer` 当前不是 Git 仓库，无法按提交/diff 复核进度与回滚 |
+| 源码可审计性 | 已完成（边界已记录） | `K:\godot\daer` 已有 Git/公开远端；E core 脏工作树未被清理，并在版本基线中明确记录 |
 
 结论：功能重构处于收尾阶段，核心玩法链路基本完成；发布就绪度仍受完整 Windows 导出、最新 UI+Bridge 可视化复验和缺少版本控制基线影响。审计估算为“功能迁移约 85%，交付就绪约 65%”，该估算不替代下面的发布门禁。
 
@@ -168,7 +170,7 @@ Expected: 区分 Godot/MCP 插件退出清理告警与项目资源泄漏；在�
 | 旧 sidecar 被误接入 | 已完成会话化修复 | core 与 Godot 升级 `runtimeVersion=daer-bridge-session-v4`；健康检查同时校验 `sessionId`，不再复用旧端口实例。 |
 | Task 2 / 最新源码联调 | 本轮完成生命周期闭环 | `build/bridge-session-lifecycle-v4/bridge` 健康检查为 v4；停止 Godot 后 Bridge 与端口自动退出，重启后生成新会话并恢复权威状态。 |
 | 手牌组合交互 | 已完成 | 暗搭子进入手牌组合轨道，拖动非中心落点恢复组合，理牌不改变牌面尺寸；Godot 离线回归通过。 |
-| Task 3 / Windows 独立导出 | 未完成 | 本轮仅执行 `-SkipGodotExport` sidecar 构建；仍需安装 export templates 并验证独立 exe。 |
+| Task 3 / Windows 独立导出 | 已完成 | 完整 package 脚本退出码 0；最终 EXE 冷启动、恢复、重开和退出清理通过。 |
 | P1 可观测性 | 待办 | 为 `_request()` 增加 HTTP result/status/body length 诊断，并用可控的截断响应做端到端回归。 |
 
 ### 本轮验收命令与结果

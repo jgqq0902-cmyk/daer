@@ -7,8 +7,8 @@
 
 | 层级 | 工作区 | 分支 | 提交 | 远端 | 工作树 |
 | --- | --- | --- | --- | --- | --- |
-| Godot 客户端与随包 Bridge | `K:\godot\daer` | `codex/audit-remediation-p0` | `ae584adab58836d8efa9e09111cb99beacd7466e` | `https://github.com/jgqq0902-cmyk/daer.git` | 已提交 |
-| core 与开发 Bridge 源码 | `E:\project\daer` | `codex/audit-remediation-p0` | `d4f74fae00364f85950dde390be261c2dcdd5445` | 未配置 | 脏工作树：51 个已修改、39 个未跟踪项（采集时） |
+| Godot 客户端与随包 Bridge | `K:\godot\daer` | `codex/audit-remediation-p0` | `382b980005acf3904df983425317a9fe12678d46`（整改代码基线仍为 `ae584ad`） | `https://github.com/jgqq0902-cmyk/daer.git` | 归档前已提交 |
+| core 与开发 Bridge 源码 | `E:\project\daer` | `codex/audit-remediation-p0` | `d4f74fae00364f85950dde390be261c2dcdd5445` | 未配置 | 脏工作树：当前 105 个状态项；保留用户改动，未清理/重置/提交 |
 
 `E:\project\daer` 的现有改动属于用户工作内容，本次整改不执行清理、重置、强制覆盖或批量暂存。core 当前没有远端，因此 core 提交只能先通过本地分支和本基线记录追踪。
 
@@ -24,15 +24,17 @@
 
 已确认 `runtime-version.txt` 与 Godot/Bridge 常量一致，且 K 包内 bundle 已由当前 core 源码重建。规则版本、协议版本、运行版本和回放 schema 的升级必须在同一整改提交中同步，禁止只改其中一层。
 
-当前 K 工作区的整改代码和随包 Bridge 已提交到 `ae584adab58836d8efa9e09111cb99beacd7466e`。E:\project\daer 的 core 仍保留用户未提交改动，故 core commit 仍以初始基线记录为定位依据，不能误称为本次整改的干净 core 提交。
+当前 K 工作区的整改代码基线为 `ae584adab58836d8efa9e09111cb99beacd7466e`，最终经审计的 Bridge bundle 同步提交为 `382b980005acf3904df983425317a9fe12678d46`。E:\project\daer 的 core 仍保留用户未提交改动，故 `d4f74fae00364f85950dde390be261c2dcdd5445` 只作为源码起点定位，不能误称为本次整改的干净 core 提交。
 
 ## 发布候选哈希
 
 | 产物 | SHA-256 |
 | --- | --- |
-| `bridge/bridge-server.mjs` | `68C0C7401FD3B8308732E53D855819E46E2CB279A60A39A1C6ECF299AFAC4420` |
+| `bridge/bridge-server.mjs` | `11355D3A65642060A744861ED4DD892A9915EEC293DF019F3D7BE24310B03F0C` |
 | `bridge/runtime-version.txt` | `87A234076E483BA4AFD05F0F2B14FA69ACB4814897F3EEECFC088319EF2D41C3` |
-| `build/release-check.pck` | `B1BC3D306FEDECBBF986ED6B15188FE93EBB24EE18BFA5578928F9CD68B6949A` |
+| `build/windows/DaerTraining.exe` | `04BAF75CC1D69DD93EB709533ECAB4FD7770BB8A530645717017A06A9D9809FC` |
+| `build/windows/DaerTraining.pck` | `B1BC3D306FEDECBBF986ED6B15188FE93EBB24EE18BFA5578928F9CD68B6949A` |
+| `build/windows/bridge/runtime/node.exe` | `56DBD529D1EAA0F59C8F015EA604FE3D505A77EF9592FC4AED8030DC79F1BC14` |
 
 ## 生成物隔离
 
@@ -51,7 +53,8 @@ core 仓库当前 `.gitignore` 已补充 `.pnpm-store/`；原有 `node_modules/`
 
 ## 当前整改验证记录
 
-- core：`tsc --noEmit` 通过；完整 Vitest 为 31 个文件通过、1 个明确跳过，240 项通过、1 项跳过；其中 GUO 7、RESP 8、BAO 6、MING 4、meld 4、三人契约 3、RuleProfile 3、Bridge runtime 13 项均通过。
+- core：`tsc --noEmit` 通过；完整 Vitest 为 31 个文件通过、1 个明确跳过，241 项通过、1 项跳过；其中 GUO 7、RESP 8、BAO 6、MING 4、meld 4、三人契约 3、RuleProfile 4、Bridge runtime 13 项均通过。
 - Godot：`--headless --path K:\godot\daer -- --test` 返回 `GAME_SERVICE_TESTS_PASSED`；移除发布耦合后无 MCP 端口启动错误，仅剩既有 headless RID/ObjectDB 泄漏警告。
-- bundled Bridge：v2/v6 smoke 已验证正确/错误/缺失令牌、三人新局、ruleVersion、OPTIONS 404、413 body limit 和无 wildcard CORS。
-- PCK：`--export-pack Windows Desktop` 成功，发布包 ASCII 禁止路径扫描命中 0 项；真实 Windows 可执行导出仍待安装 Godot 4.7.1 Windows export templates。
+- bundled Bridge：v2/v6 smoke 已验证正确/错误/缺失令牌、三人新局、ruleVersion、OPTIONS 404、413 body limit 和无 wildcard CORS；最终根目录 Bridge 与 Windows 包哈希一致。
+- Windows Release：安装 Godot 4.7.1 Windows export templates 后，完整 `package-windows-release.ps1` 退出码为 0，生成 EXE/PCK/自足 Bridge；最终包 ASCII 禁止路径扫描命中 0 项。
+- 冷启动：在未设置 `DAER_*` 开发覆盖且不调用 pnpm/tsx 的导出进程中，UI 创建三人新局；关闭后随包 `DaerTraining/cmd/node` 进程均清零；重启可恢复 version 3 快照并再次创建新局。详细命令和观察记录见 `docs/verification/2026-08-18-audit-remediation-release.md`。

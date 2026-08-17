@@ -336,7 +336,7 @@ K:/godot/daer
 53. 手牌理牌已成为真实可用设置：默认“组合理牌”按坎、顺、二七十、对子等结构纵向排列；“按牌序”改为按小写/大写及数字排序的独立横向牌列，并保留水平滚动。两种模式只影响 Godot 表现，不改变 core 手牌、动作候选或 AI 输入；1280×720 实机截图验证两种布局均不会遮挡底部操作栏，Godot 离线测试覆盖切换结果。
 54. 牌局内已提供高频理牌切换：玩家手牌区右上角显示 `理牌：组/序`，单击即可在组合理牌和按牌序间切换，并立即重绘当前权威手牌。1280×720 实机截图验证切换按钮、行动提示、手牌与底部 AI 建议/出牌栏同时可见；该操作只修改 Godot 本地展示偏好。
 55. Windows 桌面交付不再允许 `AIService` 硬编码开发机的 core 工作区。启动优先级固定为 `DAER_GODOT_BRIDGE_COMMAND`（调试覆盖）、显式 `DAER_CORE_WORKSPACE`（开发环境）、导出程序旁 `bridge/daer-ai-server.cmd`（发布 sidecar）；三者皆不存在时明确失败。这样开发者显式指定源码工作区时不会误用项目内过期 bundle，未设置开发覆盖时仍使用自足的发布 sidecar。随包脚本携带 Node 运行时与由 core/Bridge 构建出的单文件 `bridge-server.mjs`，不依赖 pnpm、tsx 或工作区 `node_modules`；续局文件写入 `%LOCALAPPDATA%\\DaerTraining\\bridge`，不污染安装目录。`tools/package-windows-release.ps1` 负责 Godot Windows 导出和 Bridge bundle 构建。
-56. 发布 sidecar 已完成实机独立验收：`tools/package-windows-release.ps1 -SkipGodotExport` 生成 `runtime/node.exe`、`bridge-server.mjs`（约 330 KB）和启动脚本。该目录以自身 `node.exe` 在临时端口启动后，正确令牌的 `/health` 返回 `runtime=daer-core`、`protocolVersion=daer-godot-v2`、`runtimeVersion=daer-bridge-session-v6`；固定 seed 新局返回 3 名玩家和 `ruleVersion=luzhou-daer-rules-v2.4`，超限 body 返回 413。完整 Godot Windows 导出仍需本机安装 4.7.1 Windows export templates 后执行。
+56. 发布 sidecar 已完成实机独立验收：`tools/package-windows-release.ps1 -SkipGodotExport` 生成 `runtime/node.exe`、`bridge-server.mjs`（约 330 KB）和启动脚本。该目录以自身 `node.exe` 在临时端口启动后，正确令牌的 `/health` 返回 `runtime=daer-core`、`protocolVersion=daer-godot-v2`、`runtimeVersion=daer-bridge-session-v6`；固定 seed 新局返回 3 名玩家和 `ruleVersion=luzhou-daer-rules-v2.4`，超限 body 返回 413。随后已安装 4.7.1 Windows export templates 并完成完整 `DaerTraining.exe` 导出、禁带路径扫描和 Release 冷启动。
 57. 牌桌操作区按成熟桌游桌面端的信息层次补齐“行动台”：底栏基于 core 当前 `availableActions` 显示真人/AI 回合、响应上下文、合法动作数和选牌状态；真人出牌按钮在未选牌时明确提示“请选择一张手牌”，选中后显示“出牌 数字”。同一权威提示提升至手牌标题区，保证 1280×720 紧凑布局下仍能在手牌旁直接看到“请选择一张手牌出牌”“已选 X · Enter 出牌”或响应目标。Godot 离线测试覆盖真人出牌、选牌、响应和 AI 回合的提示文本；本轮运行时截图因环境中多个历史 Godot 实例而不作为视觉验收依据。
 58. AI 建议从只读说明升级为受控手牌辅助：建议弹层对 `discard` 推荐提供“选中此牌”，但仅在建议携带的卡牌实例 ID 同时存在于当前 core `availableActions.discard.cards` 时才显示和应用；操作仅更新 Godot 的选中态，用户仍需点击主按钮或按 Enter，Bridge 仍会再次校验动作。伪造 ID、过期建议和非弃牌建议均拒绝应用。真实 Bridge learned 建议验收确认推荐牌 `card_拾_big_78` 带实例 ID 且存在于当前合法弃牌集合；Godot 离线回归覆盖三类拒绝情况。
 59. 默认规则条件化策略已归并至 Bridge：Godot 不再对 `availableActions` 展开、打分、选择或补写本地 decision trace；设置中的“规则条件化”映射为 `/api/game/ai-step` 的 core `fast` 模式，“原版强化”映射为 `learned`。Bridge 为 fast 步骤统一保存 `policySource=heuristic`、`policyVersion=rule-conditioned-fast-v1`、合法性结果与回放步骤。core Bridge 回归覆盖 fast trace 和 replay，Godot 回归确认客户端不再保留本地策略实现。
@@ -378,9 +378,9 @@ AI 策略可以替换或降级，但其余技术路线应保持稳定，避免�
 
 截至 2026-08-14，本节原有四项均已完成：正式牌局已由 core/Bridge 单一推进，三人局动作与响应控件、权威回放/trace、Bridge 动作守卫和状态恢复测试均已落地。当前不再扩展功能面，按发布收口顺序推进：
 
-1. **P0：完成最新源码的可视化联调。** 仅保留一个匹配 `protocolVersion=daer-godot-v2`、`runtimeVersion=daer-bridge-session-v6`、`runtime-version.txt` 与当前 `sessionId`/Bearer 令牌的运行时；在 1280x720 与 1024x640 验证新牌桌、组合内暗搭子、组合拖动、公开废牌来源、响应选项、超时、断线恢复和回放。验收必须使用最新 `handPresentation` 字段，不能用旧 sidecar 的兼容降级结果代替。
-2. **P0：闭环 Windows 独立发布。** 安装 Godot 4.7.1 Windows export templates，执行完整 `tools/package-windows-release.ps1`；在未设置 `DAER_CORE_WORKSPACE`、不依赖 pnpm/tsx 的环境中冷启动导出程序，完成固定三人局、AI 推进、续局和回放验收。
-3. **P1：固化跨层自动门禁。** 将 Godot headless 扫描、`--test`、core 类型检查、Bridge/action-guard 测试和 sidecar 健康检查整理为单一可重复验收流程，并保存日期化结果；发布候选必须全部通过。
+1. **P0：完成最新源码的可视化联调。** 已完成匹配 `protocolVersion=daer-godot-v2`、`runtimeVersion=daer-bridge-session-v6`、`runtime-version.txt`、Bearer 会话隔离和牌桌新局/恢复验收；自动化规则和发布层证据见最终验收记录。
+2. **P0：闭环 Windows 独立发布。** 已安装 Godot 4.7.1 Windows export templates，完整 `tools/package-windows-release.ps1` 通过；未设置开发覆盖且不依赖 pnpm/tsx 的导出程序已完成三人新局、恢复、重开和退出清理验收。
+3. **P1：固化跨层自动门禁。** 已将 Godot headless、`--test`、core 类型检查、Bridge/action-guard、bundled Bridge smoke、Release 扫描和 SHA-256 归档到 [`docs/verification/2026-08-18-audit-remediation-release.md`](verification/2026-08-18-audit-remediation-release.md)。
 4. **P1：恢复实时编辑器可观测性。** 需要场景树、运行时节点或截图证据时，先启动唯一 Godot 编辑器和 MCP HTTP 服务，再使用 gdmcp；未连接时明确降级为 headless 验证，不得把“服务不可达”写成项目代码失败。
 5. **P2：发布候选通过后再拆分 `scripts/main.gd`。** 先用现有 debug validator 建立行为保护，再按牌桌、手牌交互、弹层/回放等职责逐块抽离，避免在交付门禁未闭环时进行大范围结构调整。
 

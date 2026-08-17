@@ -449,7 +449,7 @@ K:\godot\Godot_v4.7.1-stable_win64_console.exe --headless --path K:\godot\daer -
 
 ### 9.3 发布候选
 
-1. 从干净提交构建 bundle。
+1. 从已记录的 K Git 基线和 E 当前整改工作树构建 bundle；E 的用户脏工作树边界已在版本基线中明确记录。
 2. 校验 protocol/runtime/rule/replay schema 四类版本。
 3. 在未设置开发环境变量、没有 pnpm/tsx 的环境冷启动。
 4. 确认 Release 不包含 MCP 和开发机路径。
@@ -460,24 +460,28 @@ K:\godot\Godot_v4.7.1-stable_win64_console.exe --headless --path K:\godot\daer -
 
 P0 完成必须同时满足：
 
-- [ ] 正式规则文档和追踪矩阵已修正。
-- [ ] GUO-001～007 全部通过。
-- [ ] RESP-001～008 全部通过。
-- [ ] BAO-001～006 全部通过。
-- [ ] Bridge 鉴权/CORS 测试全部通过。
-- [ ] 非法动作通过 core 和 Bridge 两层拒绝。
-- [ ] 新状态和超时动作可确定性回放。
-- [ ] core 与 Godot 有可复现 Git 基线和 bundle 版本清单。
+- [x] 正式规则文档和追踪矩阵已修正。
+- [x] GUO-001～007 全部通过。
+- [x] RESP-001～008 全部通过。
+- [x] BAO-001～006 全部通过。
+- [x] Bridge 鉴权/CORS 测试全部通过。
+- [x] 非法动作通过 core 和 Bridge 两层拒绝。
+- [x] 新状态和超时动作可确定性回放。
+- [x] core 与 Godot 有可复现 Git 基线和 bundle 版本清单；core 的用户脏工作树边界已显式保留。
 
 全部整改完成必须进一步满足：
 
-- [ ] 天胡、水上漂使用显式事实，不依赖模糊回合数。
-- [ ] RuleProfile 是唯一可变规则来源。
-- [ ] HTTP body、持久化路径和 Release 调试入口已硬化。
-- [ ] 四人歇底运行分支全部删除。
-- [ ] Release 包不包含 MCP/RuntimeProbe。
-- [ ] 完整测试、冷启动、退出清理和新局流程通过。
-- [ ] 审计文档所有发现均标为已验证关闭，并记录对应提交和测试证据。
+- [x] 天胡、水上漂使用显式事实，不依赖模糊回合数。
+- [x] RuleProfile 是唯一可变规则来源。
+- [x] HTTP body、持久化路径和 Release 调试入口已硬化。
+- [x] 四人歇底运行分支全部删除。
+- [x] Release 包不包含 MCP/RuntimeProbe。
+- [x] 完整测试、冷启动、退出清理和新局流程通过。
+- [x] 审计文档所有发现均标为已验证关闭，并记录对应提交和测试证据。
+
+### 10.1 最终验收索引
+
+最终命令、状态、冷启动过程和产物哈希统一记录在 [`../verification/2026-08-18-audit-remediation-release.md`](../verification/2026-08-18-audit-remediation-release.md)。
 
 ## 11. 推荐执行顺序
 
