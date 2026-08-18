@@ -1,0 +1,6 @@
+{
+  "jobId": "fixture-job",
+  "outputDir": "artifacts/fixture-train",
+  "selfPlayGames": 12,
+  "maxSamples": 128
+}

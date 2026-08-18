@@ -13,10 +13,12 @@ const SESSION_RUNTIME_PORT_BASE := 49152
 const SESSION_RUNTIME_PORT_SPAN := 1536
 const SESSION_RUNTIME_PORT_ATTEMPTS := 12
 const RUNTIME_HTTP_TIMEOUT_SECONDS := 3.0
+const TESTING_DISABLE_RESPONSE_TIMEOUT := true
 const PROTOCOL_VERSION := "daer-godot-v2"
 const RUNTIME_VERSION := "daer-bridge-session-v6"
 const BRIDGE_COMMAND_ENV := "DAER_GODOT_BRIDGE_COMMAND"
-const CORE_WORKSPACE_ENV := "DAER_CORE_WORKSPACE"
+const LEGACY_CORE_WORKSPACE_ENV := "DAER_CORE_WORKSPACE"
+const CORE_PACKAGE_RELATIVE_PATH := "packages/core"
 const BUNDLED_BRIDGE_RELATIVE_PATH := "bridge/daer-ai-server.cmd"
 const BUNDLED_BRIDGE_VERSION_FILE := "runtime-version.txt"
 const RULE_HEURISTIC_DEFAULT := true
@@ -37,6 +39,7 @@ var _runtime_port := 0
 var _runtime_session_id := ""
 var _runtime_auth_token := ""
 var _runtime_parent_pid := 0
+var _legacy_workspace_warning_emitted := false
 var _startup_restore_checked := false
 var _startup_restore_cancelled := false
 var _new_game_in_progress := false
@@ -132,7 +135,7 @@ func ensure_runtime() -> bool:
         return false
     var command := _runtime_start_command()
     if command.is_empty():
-        _fail("未找到本地 daer 规则服务。发布包应包含 bridge，开发环境请设置 %s。" % CORE_WORKSPACE_ENV)
+        _fail("未找到 K 工作区的 daer 规则服务。请安装 packages/core 依赖，或确认 K 工作区的 bridge 完整。")
         return false
     _starting_runtime = true
     for port_attempt in SESSION_RUNTIME_PORT_ATTEMPTS:
@@ -167,20 +170,27 @@ func ensure_runtime() -> bool:
 
 func _runtime_start_command() -> String:
     var configured_command := OS.get_environment(BRIDGE_COMMAND_ENV).strip_edges()
+    var legacy_core_workspace := OS.get_environment(LEGACY_CORE_WORKSPACE_ENV).strip_edges()
+    if not legacy_core_workspace.is_empty() and not _legacy_workspace_warning_emitted:
+        _legacy_workspace_warning_emitted = true
+        push_warning("[daer] 已忽略 DAER_CORE_WORKSPACE；当前 Godot 只使用 K 工作区本地 Core 或随包 Bridge。")
     if _is_release_build():
-        if not configured_command.is_empty() or not OS.get_environment(CORE_WORKSPACE_ENV).strip_edges().is_empty():
-            push_warning("[daer] Release 构建忽略开发 Bridge 覆盖，使用随包 Bridge。")
+        if not configured_command.is_empty() or not legacy_core_workspace.is_empty():
+            push_warning("[daer] Release 构建忽略开发运行时覆盖，使用 K 工作区随包 Bridge。")
         var bundled_release_bridge := _bundled_bridge_path()
         if not bundled_release_bridge.is_empty():
             return _runtime_environment_prefix() + "call \"%s\"" % bundled_release_bridge
         return ""
     if not configured_command.is_empty():
         return _runtime_environment_prefix() + configured_command
-    var core_workspace := OS.get_environment(CORE_WORKSPACE_ENV).strip_edges()
-    if not core_workspace.is_empty():
-        var dev_entry := core_workspace.path_join("packages/core/scripts/godot-ai-server.ts")
-        if FileAccess.file_exists(dev_entry):
-            return _runtime_environment_prefix() + "cd /d \"%s\" && pnpm --dir packages/core exec tsx scripts/godot-ai-server.ts" % core_workspace
+    var project_root := ProjectSettings.globalize_path("res://")
+    var core_root := project_root.path_join(CORE_PACKAGE_RELATIVE_PATH)
+    var dev_entry := core_root.path_join("scripts/godot-ai-server.ts")
+    var tsx_command := core_root.path_join("node_modules/.bin/tsx.cmd")
+    if not FileAccess.file_exists(tsx_command):
+        tsx_command = core_root.path_join("node_modules/.bin/tsx")
+    if FileAccess.file_exists(dev_entry) and FileAccess.file_exists(tsx_command):
+        return _runtime_environment_prefix() + "cd /d \"%s\" && pnpm --dir %s exec tsx scripts/godot-ai-server.ts" % [project_root, CORE_PACKAGE_RELATIVE_PATH]
     var bundled_bridge := _bundled_bridge_path()
     if not bundled_bridge.is_empty():
         return _runtime_environment_prefix() + "call \"%s\"" % bundled_bridge
@@ -220,10 +230,10 @@ func debug_bundled_bridge_version_matches(script_path: String) -> bool:
         return false
     return version_file.get_as_text().strip_edges() == RUNTIME_VERSION
 
-func debug_runtime_launch_kind(environment_command: String = "", core_workspace: String = "", bundled_bridge_exists: bool = false) -> String:
+func debug_runtime_launch_kind(environment_command: String = "", local_core_workspace: String = "", bundled_bridge_exists: bool = false) -> String:
     if not environment_command.strip_edges().is_empty():
         return "command"
-    if not core_workspace.strip_edges().is_empty():
+    if not local_core_workspace.strip_edges().is_empty():
         return "development"
     if bundled_bridge_exists:
         return "bundled"
@@ -243,7 +253,8 @@ func debug_runtime_port_for_session(parent_process_id: int, attempt: int = 0) ->
     return SESSION_RUNTIME_PORT_BASE + (abs(parent_process_id) + maxi(attempt, 0)) % SESSION_RUNTIME_PORT_SPAN
 
 func debug_runtime_environment_prefix_for_session(port: int, session_id: String, parent_process_id: int) -> String:
-    return "set \"DAER_GODOT_AI_PORT=%d\" && set \"DAER_GODOT_SESSION_ID=%s\" && set \"DAER_GODOT_PARENT_PID=%d\" && set \"DAER_BRIDGE_TOKEN=%s\" && set \"DAER_GODOT_STATE_FILE=%%LOCALAPPDATA%%\\DaerTraining\\bridge\\godot-game-state.json\" && " % [port, session_id, parent_process_id, _runtime_auth_token]
+    var timeout_flag := "set \"DAER_DISABLE_RESPONSE_TIMEOUT=1\" && " if TESTING_DISABLE_RESPONSE_TIMEOUT and (OS.has_feature("editor") or OS.is_debug_build()) else ""
+    return timeout_flag + "set \"DAER_GODOT_AI_PORT=%d\" && set \"DAER_GODOT_SESSION_ID=%s\" && set \"DAER_GODOT_PARENT_PID=%d\" && set \"DAER_BRIDGE_TOKEN=%s\" && set \"DAER_GODOT_STATE_FILE=%%LOCALAPPDATA%%\\DaerTraining\\bridge\\godot-game-state.json\" && " % [port, session_id, parent_process_id, _runtime_auth_token]
 
 func debug_runtime_response_matches_session(response: Dictionary, session_id: String) -> bool:
     return _is_runtime_version_compatible(response) and str(response.get("sessionId", "")) == session_id
@@ -330,6 +341,13 @@ func debug_should_restore_startup_game(health: Dictionary) -> bool:
 
 func debug_should_reconcile_new_game_state(request_generation: int, current_generation: int, response_state: Dictionary, current_state: Dictionary) -> bool:
     return request_generation == current_generation and response_state.is_empty() and current_state.is_empty()
+
+func debug_should_reconcile_error_state(response: Dictionary, current_state: Dictionary) -> bool:
+    var response_state_variant = response.get("state", {})
+    if typeof(response_state_variant) != TYPE_DICTIONARY:
+        return false
+    var response_state: Dictionary = response_state_variant
+    return response.get("ok", true) != true and not response_state.is_empty() and response_state != current_state
 
 func request_advice(player_index: int = 0, mode: String = "learned") -> void:
     if latest_state.is_empty() or not await _ensure_request_runtime():
@@ -460,11 +478,16 @@ func _request(path: String, method: HTTPClient.Method, payload: Dictionary = {},
             _fail("AI 服务返回了无效数据。")
         return {}
     var response: Dictionary = parsed
+    var reconciled_error_state := false
     if status_code < 200 or status_code >= 300 or response.get("ok", false) != true:
+        if debug_should_reconcile_error_state(response, latest_state):
+            reconciled_error_state = true
+            latest_state = Dictionary(response.get("state", {})).duplicate(true)
+            state_received.emit(latest_state)
         if status_code <= 0 or status_code >= 500:
             _set_connection_state(false)
         if report_failure:
-            _fail(str(response.get("error", "AI 服务请求失败。")))
+            _fail("响应局面已更新，已按最新牌局刷新。" if reconciled_error_state else str(response.get("error", "AI 服务请求失败。")))
         return {}
     if update_connection:
         _set_connection_state(true)

@@ -20,3 +20,11 @@ guandan/
 # Local vendored MCP development checkout and compiled toolchains
 tools/Godot-MCP-Native/
 
+# K-local TypeScript Core generated files
+packages/core/node_modules/
+packages/core/dist/
+packages/core/coverage/
+packages/core/artifacts/
+packages/core/.daer/
+packages/core/.godot-windows-bridge-staging/
+packages/core/packages/

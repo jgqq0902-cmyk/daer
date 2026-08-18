@@ -10,30 +10,39 @@ const RED := Color("9d382b")
 const JADE := Color("73c19a")
 const CARD_BRUSH_FONT_PATH := "res://assets/fonts/MaShanZheng-Regular.ttf"
 const AI_ACTION_DELAY_SECONDS := 1.15
+const ANIMATION_CHAIN_BUFFER_SECONDS := 0.15
 const HUMAN_AUTO_PROGRESS_RETRY_SECONDS := 0.35
 const AUTO_PROGRESS_POLL_SECONDS := 0.25
-const ACTION_ANIMATION_SECONDS := 0.52
+const ANIMATION_DURATION_SECONDS := 1.0
+const ACTION_ANIMATION_SECONDS := ANIMATION_DURATION_SECONDS
 const CARD_FACE_HEIGHT_RATIO := 4.0
 const ACTION_ANIMATION_CARD_SIZE := Vector2(34, 136)
-const ACTION_TEXT_ANIMATION_SECONDS := 0.72
+const ACTION_TEXT_ANIMATION_SECONDS := ANIMATION_DURATION_SECONDS
+const CARD_STACK_VISIBLE_HEIGHT_RATIO := 1.0
+const CARD_STACK_STEP_RATIO := 0.82
 const PUBLIC_MELD_CARD_WIDTH := 31.0
-const PUBLIC_MELD_CARD_VISIBLE_HEIGHT := 30.0
-const PUBLIC_MELD_CARD_STEP := 30.0
+const PUBLIC_MELD_CARD_VISIBLE_HEIGHT := PUBLIC_MELD_CARD_WIDTH * CARD_STACK_VISIBLE_HEIGHT_RATIO
+const PUBLIC_MELD_CARD_STEP := PUBLIC_MELD_CARD_VISIBLE_HEIGHT * CARD_STACK_STEP_RATIO
 const PUBLIC_MELD_GROUP_WIDTH := 37.0
 const DECK_STACK_CARD_SIZE := Vector2(70, 42)
 const DECK_STACK_CARD_STEP := Vector2(12, 0)
-const DISCARD_PENDING_CARD_SIZE := Vector2(44, 44)
+const DISCARD_PENDING_CARD_SIZE := Vector2(54, 54)
 const DISCARD_ARCHIVE_CARD_WIDTH := 31.0
 const DISCARD_ARCHIVE_CARD_HEIGHT := 30.0
+const DISCARD_LOCKED_MODULATE := Color(0.52, 0.56, 0.52, 0.78)
+const DISCARD_PENDING_MODULATE := Color(1.0, 0.92, 0.56, 1.0)
 const DISCARD_ZONE_WIDTH := 118.0
 const DISCARD_ZONE_HEIGHT := 190.0
 const DISCARD_DROP_HIT_MARGIN := 26.0
 const DISCARD_DRAG_Y_THRESHOLD := 300.0
+const RESPONSE_ANIMATION_HOLD_SECONDS := ANIMATION_DURATION_SECONDS
 const COORDINATE_RULER_LEFT := 28.0
 const COORDINATE_RULER_STEP := 100
-const PICKER_CARD_WIDTH := 48.0
-const PICKER_CARD_VISIBLE_HEIGHT := 44.0
-const PICKER_CARD_STEP := 34.0
+const PICKER_CARD_WIDTH := 34.0
+const PICKER_CARD_VISIBLE_HEIGHT := PICKER_CARD_WIDTH * CARD_STACK_VISIBLE_HEIGHT_RATIO
+const REPLAY_HAND_CARD_WIDTH := 34.0
+const REPLAY_HAND_CARD_VISIBLE_HEIGHT := REPLAY_HAND_CARD_WIDTH * CARD_STACK_VISIBLE_HEIGHT_RATIO
+const REPLAY_HAND_GROUP_GAP := 8.0
 const TABLE_SURFACE_SCENE := preload("res://scenes/table/table_surface.tscn")
 const OPPONENT_SEAT_SCENE := preload("res://scenes/table/opponent_seat.tscn")
 const MELD_GROUP_VIEW_SCENE := preload("res://scenes/table/meld_group_view.tscn")
@@ -105,6 +114,10 @@ var _previous_live_state: Dictionary = {}
 var _previous_live_animation_positions: Dictionary = {}
 var _current_live_animation_positions: Dictionary = {}
 var _action_animation_layer: Control
+var _action_animation_generation := 0
+var _action_animation_ready_at_msec := 0
+var _response_animation_hold_generation := 0
+var _response_animation_hold: Dictionary = {}
 
 func _state_active_player(state: Dictionary) -> int:
 	return int(state.get("activePlayerIndex", state.get("currentPlayerIndex", -1)))
@@ -220,8 +233,8 @@ func _build_shell() -> void:
 	toast.z_index = 10
 	add_child(toast)
 	option_popup = PopupPanel.new()
-	option_popup.size = Vector2i(420, 0)
-	option_popup.add_theme_stylebox_override("panel", _box(PAPER, 6, 16, GOLD, 2))
+	option_popup.size = Vector2i(0, 0)
+	option_popup.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	add_child(option_popup)
 	decision_popup = PopupPanel.new()
 	decision_popup.size = Vector2i(500, 0)
@@ -315,6 +328,40 @@ func _available_action(state: Dictionary, action_type: String) -> Dictionary:
 		if str(action.get("type", "")) == action_type:
 			return action
 	return {}
+
+func _authoritative_available_action(available: Dictionary, chi_option: Dictionary = {}, hu_option: Dictionary = {}) -> Dictionary:
+	var action_type := str(available.get("type", ""))
+	var current: Dictionary = {}
+	var requested_cards: Array = Array(available.get("cards", []))
+	var requested_card_id := str(Dictionary(requested_cards[0]).get("id", "")) if not requested_cards.is_empty() else ""
+	for raw_action in Array(AIService.latest_state.get("availableActions", [])):
+		var candidate: Dictionary = raw_action
+		if str(candidate.get("type", "")) != action_type:
+			continue
+		if action_type == "bao":
+			var candidate_cards: Array = Array(candidate.get("cards", []))
+			var candidate_card_id := str(Dictionary(candidate_cards[0]).get("id", "")) if not candidate_cards.is_empty() else ""
+			if requested_card_id != candidate_card_id:
+				continue
+		current = candidate
+		break
+	if current.is_empty() and action_type != "bao":
+		current = _available_action(AIService.latest_state, action_type)
+	if current.is_empty():
+		return {}
+	if not chi_option.is_empty():
+		var current_chi_options: Array = current.get("chiOptions", [])
+		if not current_chi_options.any(func(raw_option: Dictionary) -> bool:
+			return str(raw_option.get("id", "")) == str(chi_option.get("id", ""))
+		):
+			return {}
+	if not hu_option.is_empty():
+		var current_hu_options: Array = current.get("huOptions", [])
+		if not current_hu_options.any(func(raw_option: Dictionary) -> bool:
+			return str(raw_option.get("id", "")) == str(hu_option.get("id", ""))
+		):
+			return {}
+	return current
 
 func _can_submit_selected_discard(state: Dictionary) -> bool:
 	if selected_card_id.is_empty():
@@ -422,7 +469,7 @@ func _run_full_ai_demo(demo_generation: int, game_generation: int) -> void:
 	while demo_generation == _ai_demo_generation and game_generation == AIService.game_generation and not AIService.latest_state.is_empty() and not bool(AIService.latest_state.get("isGameOver", false)) and guard < 360:
 		guard += 1
 		await AIService.run_ai_step(_selected_ai_mode())
-		await get_tree().create_timer(AI_ACTION_DELAY_SECONDS).timeout
+		await get_tree().create_timer(_action_animation_wait_seconds()).timeout
 	if demo_generation == _ai_demo_generation:
 		_ai_demo_running = false
 	if demo_generation == _ai_demo_generation and game_generation == AIService.game_generation and guard >= 360:
@@ -457,7 +504,7 @@ func show_game() -> void:
 		settled_replay_id = AIService.replay_id
 		call_deferred("_show_settlement", state.duplicate(true))
 
-func _build_table_surface(state: Dictionary, include_actions: bool = true) -> Control:
+func _build_table_surface(state: Dictionary, include_actions: bool = true, replay_view: bool = false) -> Control:
 	var surface := TABLE_SURFACE_SCENE.instantiate() as Control
 	surface.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	surface.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -470,13 +517,13 @@ func _build_table_surface(state: Dictionary, include_actions: bool = true) -> Co
 	var settings_button := surface.get_node("GameNavigation/SettingsButton") as Button
 	settings_button.pressed.connect(func(): _navigate("settings"))
 
-	var left_opponent := _build_opponent_seat(state, 1, include_actions)
+	var left_opponent := _build_opponent_seat(state, 1, include_actions, replay_view)
 	var left_slot := surface.get_node("OpponentLeftSlot") as Control
 	if not include_actions:
 		left_slot.offset_top = 12
 		left_slot.offset_bottom = 184
 	left_slot.add_child(left_opponent)
-	var right_opponent := _build_opponent_seat(state, 2, include_actions)
+	var right_opponent := _build_opponent_seat(state, 2, include_actions, replay_view)
 	var right_slot := surface.get_node("OpponentRightSlot") as Control
 	if not include_actions:
 		right_slot.offset_top = 12
@@ -493,7 +540,7 @@ func _build_table_surface(state: Dictionary, include_actions: bool = true) -> Co
 		discard_zones.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_layout_discard_zones(discard_zones)
 
-	var player_area := _build_player_area(state, include_actions)
+	var player_area := _build_player_area(state, include_actions, replay_view)
 	var player_area_slot := surface.get_node("PlayerAreaSlot") as Control
 	player_area_slot.anchor_top = player_top
 	player_area_slot.add_child(player_area)
@@ -614,7 +661,7 @@ func _build_opponents(state: Dictionary) -> Control:
 		row.add_child(_build_opponent_seat(state, index))
 	return row
 
-func _build_opponent_seat(state: Dictionary, index: int, interactive: bool = true) -> Control:
+func _build_opponent_seat(state: Dictionary, index: int, interactive: bool = true, replay_view: bool = false) -> Control:
 	var players: Array = state.get("players", [])
 	var player: Dictionary = Dictionary(players[index]) if index >= 0 and index < players.size() else {}
 	var game_over := bool(state.get("isGameOver", false))
@@ -647,9 +694,13 @@ func _build_opponent_seat(state: Dictionary, index: int, interactive: bool = tru
 	if not action_banner.text.is_empty():
 		badge.add_child(action_banner)
 		badge.move_child(action_banner, badge.get_child_count() - 1)
-	private_fan.add_theme_constant_override("separation", -16)
-	for _card_index in clampi(ceili(float(Array(player.get("cards", [])).size()) / 4.0), 3, 5):
-		private_fan.add_child(_card_back(Vector2(28, 42)))
+	if replay_view:
+		private_fan.add_theme_constant_override("separation", 0)
+		private_fan.add_child(_build_replay_hand_groups(Array(player.get("cards", [])), BoxContainer.ALIGNMENT_BEGIN if index == 1 else BoxContainer.ALIGNMENT_END))
+	else:
+		private_fan.add_theme_constant_override("separation", -16)
+		for _card_index in clampi(ceili(float(Array(player.get("cards", [])).size()) / 4.0), 3, 5):
+			private_fan.add_child(_card_back(Vector2(28, 42)))
 	var public_melds := seat.get_node("Badge/TableRow/PublicMelds") as HBoxContainer
 	public_melds.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	public_melds.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
@@ -684,11 +735,14 @@ func _opponent_public_melds(melds: Array) -> Control:
 		margin.add_theme_constant_override("margin_right", 3)
 		margin.add_theme_constant_override("margin_bottom", 3)
 		var cards_row := group.get_node("Margin/Cards") as VBoxContainer
+		var stack_metrics := _card_stack_metrics(PUBLIC_MELD_CARD_WIDTH)
+		var visible_height := float(stack_metrics.get("visible_height", PUBLIC_MELD_CARD_VISIBLE_HEIGHT))
+		var stack_step := float(stack_metrics.get("step", PUBLIC_MELD_CARD_STEP))
 		cards_row.alignment = BoxContainer.ALIGNMENT_END
-		cards_row.add_theme_constant_override("separation", -int(PUBLIC_MELD_CARD_VISIBLE_HEIGHT - PUBLIC_MELD_CARD_STEP))
+		cards_row.add_theme_constant_override("separation", -int(roundf(visible_height - stack_step)))
 		for raw_card in Array(meld.get("cards", [])):
 			var card: Dictionary = raw_card
-			var face := _cropped_hand_card_art(card, PUBLIC_MELD_CARD_WIDTH, PUBLIC_MELD_CARD_VISIBLE_HEIGHT)
+			var face := _cropped_hand_card_art(card, float(stack_metrics.get("width", PUBLIC_MELD_CARD_WIDTH)), visible_height)
 			face.name = "PublicCardFace_%s" % str(card.get("id", ""))
 			face.set_meta("animation_card_id", str(card.get("id", "")))
 			face.add_to_group("live_card_face")
@@ -696,12 +750,60 @@ func _opponent_public_melds(melds: Array) -> Control:
 			cards_row.add_child(face)
 		if cards_row.get_child_count() == 0:
 			continue
-		var cards_height := PUBLIC_MELD_CARD_VISIBLE_HEIGHT + maxf(float(cards_row.get_child_count() - 1) * PUBLIC_MELD_CARD_STEP, 0.0)
-		cards_row.custom_minimum_size = Vector2(PUBLIC_MELD_CARD_WIDTH, cards_height)
+		var cards_height := visible_height + maxf(float(cards_row.get_child_count() - 1) * stack_step, 0.0)
+		cards_row.custom_minimum_size = Vector2(float(stack_metrics.get("width", PUBLIC_MELD_CARD_WIDTH)), cards_height)
 		# Keep every group wider than its card art and leave an explicit row gap;
 		# adjacent meld columns therefore cannot cover one another.
-		group.custom_minimum_size = Vector2(PUBLIC_MELD_GROUP_WIDTH, cards_height + 6.0)
+		group.custom_minimum_size = Vector2(maxf(PUBLIC_MELD_GROUP_WIDTH, float(stack_metrics.get("width", PUBLIC_MELD_CARD_WIDTH)) + 6.0), cards_height + 6.0)
 		row.add_child(group)
+	return row
+
+func _build_replay_hand_groups(cards: Array, alignment: int = BoxContainer.ALIGNMENT_CENTER) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.name = "ReplayHandGroups"
+	row.alignment = alignment
+	row.add_theme_constant_override("separation", int(REPLAY_HAND_GROUP_GAP))
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	row.set_meta("replay_card_count", cards.size())
+
+	var stack_metrics := _card_stack_metrics(REPLAY_HAND_CARD_WIDTH)
+	var card_width := float(stack_metrics.get("width", REPLAY_HAND_CARD_WIDTH))
+	var visible_height := float(stack_metrics.get("visible_height", REPLAY_HAND_CARD_VISIBLE_HEIGHT))
+	var stack_step := float(stack_metrics.get("step", REPLAY_HAND_CARD_VISIBLE_HEIGHT * CARD_STACK_STEP_RATIO))
+	var groups := _hand_groups(cards)
+	var max_stack_height := visible_height
+	for raw_group in groups:
+		var group_cards: Array = Array(Dictionary(raw_group).get("cards", []))
+		max_stack_height = maxf(max_stack_height, visible_height + maxf(float(group_cards.size() - 1) * stack_step, 0.0))
+	row.set_meta("replay_group_count", groups.size())
+	row.custom_minimum_size = Vector2(
+		card_width * float(groups.size()) + REPLAY_HAND_GROUP_GAP * maxf(float(groups.size() - 1), 0.0),
+		max_stack_height,
+	)
+
+	for group_index in groups.size():
+		var group: Dictionary = groups[group_index]
+		var group_cards: Array = Array(group.get("cards", []))
+		var stack_height := visible_height + maxf(float(group_cards.size() - 1) * stack_step, 0.0)
+		var column := VBoxContainer.new()
+		column.name = "ReplayHandGroup_%d" % group_index
+		column.alignment = BoxContainer.ALIGNMENT_END
+		column.add_theme_constant_override("separation", -int(roundf(visible_height - stack_step)))
+		column.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		column.custom_minimum_size = Vector2(card_width, stack_height)
+		column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		column.set_meta("group_kind", str(group.get("kind", "single")))
+		for raw_card in group_cards:
+			var card: Dictionary = raw_card
+			var face := _cropped_hand_card_art(card, card_width, visible_height)
+			face.name = "ReplayCardFace_%s" % str(card.get("id", ""))
+			face.set_meta("replay_card_id", str(card.get("id", "")))
+			face.add_to_group("replay_hand_card")
+			face.tooltip_text = _card_size_text(card)
+			column.add_child(face)
+		row.add_child(column)
 	return row
 
 func _opponent_card_fan(card_count: int, dimensions: Vector2 = Vector2(19, 29)) -> Control:
@@ -833,7 +935,7 @@ func _build_discard_zone(state: Dictionary, player_index: int, interactive: bool
 		archive_art.add_to_group("live_card_face")
 		archive_art.set_meta("animation_card_id", str(archive_card.get("id", "")))
 		archive_art.set_meta("discard_player_index", player_index)
-		archive_art.modulate = Color(0.52, 0.56, 0.52, 0.78)
+		archive_art.modulate = DISCARD_LOCKED_MODULATE
 		archive_art.tooltip_text = _card_size_text(archive_card)
 		archive_row.add_child(archive_art)
 	if pending_active:
@@ -847,6 +949,8 @@ func _build_discard_zone(state: Dictionary, player_index: int, interactive: bool
 		pending_art.add_to_group("live_card_face")
 		pending_art.set_meta("animation_card_id", str(pending.get("id", "")))
 		pending_art.set_meta("discard_player_index", player_index)
+		pending_art.set_meta("discard_locked", true)
+		pending_art.modulate = DISCARD_PENDING_MODULATE
 		pending_slot.add_child(pending_art)
 		archive_row.add_child(pending_slot)
 	body.add_child(archive_row)
@@ -874,6 +978,9 @@ func _layout_discard_zones(zones: Control) -> void:
 		anchor.size = Vector2.ONE
 
 func _discard_zone_pending_card(state: Dictionary, player_index: int) -> Dictionary:
+	var held := _response_animation_hold_card(player_index)
+	if not held.is_empty():
+		return held
 	if str(state.get("phase", "")) != "response_collecting":
 		return {}
 	var pile: Dictionary = state.get("discardPile", {})
@@ -886,25 +993,67 @@ func _discard_zone_archive_entries(state: Dictionary, player_index: int, pending
 	var pile: Dictionary = state.get("discardPile", {})
 	var entries: Array = []
 	var seen := {}
+	var live_ids := {}
+	for raw_card in Array(pile.get("cards", [])):
+		var live_card: Dictionary = raw_card
+		var live_id := str(live_card.get("id", ""))
+		if not live_id.is_empty():
+			live_ids[live_id] = true
+	if not pending_id.is_empty():
+		live_ids[pending_id] = true
 	for raw_entry in Array(pile.get("discardHistory", [])):
 		var entry: Dictionary = raw_entry
 		var card: Dictionary = entry.get("card", {})
 		var card_id := str(card.get("id", ""))
-		if int(entry.get("playerIndex", -1)) != player_index or card.is_empty() or card_id == pending_id or seen.has(card_id):
+		if int(entry.get("playerIndex", -1)) != player_index or card.is_empty() or card_id == pending_id or seen.has(card_id) or not live_ids.has(card_id):
 			continue
 		seen[card_id] = true
 		entries.append(entry)
-	for raw_card in Array(pile.get("cards", [])):
-		var card: Dictionary = raw_card
-		var card_id := str(card.get("id", ""))
-		if card.is_empty() or card_id == pending_id or seen.has(card_id):
-			continue
-		if int(pile.get("lastDiscardPlayerIndex", -1)) == player_index:
-			seen[card_id] = true
-			entries.append({"card": card, "playerIndex": player_index, "source": "discard"})
+	# Legacy snapshots may omit discardHistory, but only the current lastDiscard
+	# has an owner in that shape. Never assign the whole shared pile to that
+	# player; doing so makes old cards appear in the wrong discard zone.
+	var fallback_variant: Variant = pile.get("lastDiscard", {})
+	var fallback_card: Dictionary = fallback_variant if typeof(fallback_variant) == TYPE_DICTIONARY else {}
+	var fallback_id := str(fallback_card.get("id", ""))
+	if not fallback_card.is_empty() \
+		and pending_id.is_empty() \
+		and int(pile.get("lastDiscardPlayerIndex", -1)) == player_index \
+		and not seen.has(fallback_id):
+		seen[fallback_id] = true
+		entries.append({"card": fallback_card, "playerIndex": player_index, "source": "discard"})
 	var max_archive_count := 3 if not pending_id.is_empty() else 4
 	var start := maxi(0, entries.size() - max_archive_count)
 	return entries.slice(start)
+
+func _response_animation_hold_card(player_index: int) -> Dictionary:
+	if _response_animation_hold.is_empty():
+		return {}
+	if int(_response_animation_hold.get("playerIndex", -1)) != player_index:
+		return {}
+	var held_generation := int(_response_animation_hold.get("generation", -1))
+	if held_generation != _response_animation_hold_generation:
+		return {}
+	var held_card: Dictionary = Dictionary(_response_animation_hold.get("card", {}))
+	return held_card.duplicate(true)
+
+func _response_animation_hold_for_action(action: Dictionary, previous_state: Dictionary, _current_state: Dictionary) -> Dictionary:
+	var action_type := str(action.get("type", ""))
+	if action_type not in ["chi", "peng", "zhao", "hu"]:
+		return {}
+	var actor_index := _action_animation_player_index(action, previous_state, _current_state)
+	if actor_index < 0:
+		return {}
+	var pending := _pending_response_card(previous_state)
+	if pending.is_empty():
+		return {}
+	var source_player_index := int(Dictionary(previous_state.get("discardPile", {})).get("lastDiscardPlayerIndex", -1))
+	if source_player_index < 0:
+		return {}
+	return {
+		"card": pending.duplicate(true),
+		"playerIndex": source_player_index,
+		"duration": RESPONSE_ANIMATION_HOLD_SECONDS,
+	}
 
 func _update_drop_zone_rect(zone: Control) -> void:
 	if is_instance_valid(zone):
@@ -1366,9 +1515,9 @@ func debug_validate_discard_chip_real_art() -> bool:
 		if full_art != null and full_art.get_child_count() == 1:
 			var texture := full_art.get_child(0) as TextureRect
 			texture_loaded = texture != null and texture.texture != null
-	var valid := chip.custom_minimum_size == Vector2(37.0, 36.0) \
+	var valid := chip.custom_minimum_size == Vector2(PUBLIC_MELD_GROUP_WIDTH, PUBLIC_MELD_CARD_VISIBLE_HEIGHT + 6.0) \
 		and art != null \
-		and art.custom_minimum_size == Vector2(31.0, 30.0) \
+		and art.custom_minimum_size == Vector2(PUBLIC_MELD_CARD_WIDTH, PUBLIC_MELD_CARD_VISIBLE_HEIGHT) \
 		and chip.get_node_or_null("Body/Source") == null \
 		and texture_loaded
 	chip.free()
@@ -1394,15 +1543,30 @@ func _build_center_actions(state: Dictionary) -> Control:
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 6)
 	var allowed_types: Array[String] = ["hu", "zhao", "peng", "chi", "pass"]
+	var seen_bao_faces := {}
 	if phase == "bao_selection":
 		allowed_types = ["bao", "pass_bao"]
 	elif phase == "discarding":
 		allowed_types = ["bao"]
-	for raw_action in actions:
+	for action_index in actions.size():
+		var raw_action = actions[action_index]
 		var action: Dictionary = raw_action
-		if not allowed_types.has(str(action.get("type", ""))):
+		var action_type := str(action.get("type", ""))
+		if not allowed_types.has(action_type):
 			continue
-		var button := _response_button(action)
+		var button: Button
+		var action_cards: Array = Array(action.get("cards", []))
+		if action_type == "bao" and not action_cards.is_empty():
+			var candidate_card: Dictionary = action_cards[0]
+			var bao_face_key := _card_size_text(candidate_card)
+			if seen_bao_faces.has(bao_face_key):
+				continue
+			seen_bao_faces[bao_face_key] = true
+			var submit_callback := _make_action_snapshot_callback(action, func(payload: Dictionary): _submit_available_action(payload))
+			button = _option_picker_card_button("爆", action_index + 1, [candidate_card], action_cards, submit_callback)
+			button.tooltip_text = str(action.get("description", _card_size_text(candidate_card)))
+		else:
+			button = _response_button(action)
 		button.disabled = _advice_loading or _ai_advancing or _ai_demo_running
 		row.add_child(button)
 	return row if not row.get_children().is_empty() else null
@@ -1448,7 +1612,7 @@ func _discard_history_strip(state: Dictionary) -> Control:
 		strip.add_child(item)
 	return strip
 
-func _build_player_area(state: Dictionary, interactive: bool = true) -> Control:
+func _build_player_area(state: Dictionary, interactive: bool = true, replay_view: bool = false) -> Control:
 	var frame := PLAYER_HAND_AREA_SCENE.instantiate() as Panel
 	frame.add_to_group("live_turn_seat_0")
 	frame.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
@@ -1475,13 +1639,22 @@ func _build_player_area(state: Dictionary, interactive: bool = true) -> Control:
 	var arrangement := frame.get_node("Panel/Header/ArrangeButton") as Button
 	arrangement.tooltip_text = "恢复自动组合"
 	arrangement.add_theme_font_size_override("font_size", 11)
+	arrangement.visible = not replay_view
 	arrangement.pressed.connect(func(): _toggle_hand_arrangement())
 	var player_melds: Array = Dictionary(players[0]).get("melds", []) if not players.is_empty() else []
 	var free_hand_slot := frame.get_node("Panel/Body/FreeHandSlot") as Control
 	free_hand_slot.add_to_group("live_hand_source_0")
 	var human_cards: Array = Array(Dictionary(players[0]).get("cards", [])) if not players.is_empty() else []
 	var locked_melds := _locked_hand_melds(state)
-	var free_hand := _build_free_hand_area(human_cards, locked_melds, state, interactive)
+	var free_hand: Control
+	if replay_view:
+		_free_hand_track = null
+		_free_hand_card_nodes.clear()
+		_rendered_free_hand_cards.clear()
+		_rendered_hand_groups.clear()
+		free_hand = _build_replay_hand_groups(human_cards)
+	else:
+		free_hand = _build_free_hand_area(human_cards, locked_melds, state, interactive)
 	free_hand.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	free_hand_slot.add_child(free_hand)
 	var exposed := frame.get_node("Panel/Body/ExposedMelds") as VBoxContainer
@@ -1574,24 +1747,18 @@ func _build_locked_hand_area(human_cards: Array, locked_melds: Array) -> Control
 		var meld: Dictionary = raw_meld
 		var column := VBoxContainer.new()
 		column.alignment = BoxContainer.ALIGNMENT_END
-		column.add_theme_constant_override("separation", -106)
+		var stack_metrics := _card_stack_metrics(26.0)
+		column.add_theme_constant_override("separation", -int(roundf(float(stack_metrics.get("visible_height", 26.0)) - float(stack_metrics.get("step", 16.0)))))
 		for raw_id in Array(meld.get("cardIds", [])):
 			var card := _find_card_in_array(human_cards, str(raw_id))
 			if card.is_empty():
 				continue
-			var dim := Vector2(26, 104)
-			var art := _card_art(card, dim)
+			var art := _cropped_hand_card_art(card, float(stack_metrics.get("width", 26.0)), float(stack_metrics.get("visible_height", 26.0)))
 			art.add_to_group("live_card_face")
 			art.set_meta("animation_card_id", str(card.get("id", "")))
 			art.modulate = Color(0.37, 0.40, 0.38, 0.96)
 			column.add_child(art)
 		panel.add_child(column)
-		var mark := Label.new()
-		mark.text = "锁 · " + str(meld.get("label", "坎"))
-		mark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		mark.add_theme_font_size_override("font_size", 10)
-		mark.add_theme_color_override("font_color", Color("aab8ae"))
-		panel.add_child(mark)
 	return area
 
 func _build_free_hand_area(human_cards: Array, locked_melds: Array, state: Dictionary, interactive: bool = true) -> Control:
@@ -1641,10 +1808,21 @@ func _build_free_hand_area(human_cards: Array, locked_melds: Array, state: Dicti
 	call_deferred("_update_current_free_hand_track_rect")
 	return area
 
+func _card_stack_metrics(card_width: float) -> Dictionary:
+	var width := maxf(card_width, 1.0)
+	var visible_height := width * CARD_STACK_VISIBLE_HEIGHT_RATIO
+	var step := maxf(visible_height * CARD_STACK_STEP_RATIO, 1.0)
+	return {
+		"width": width,
+		"visible_height": visible_height,
+		"step": step,
+		"full_height": width * CARD_FACE_HEIGHT_RATIO,
+	}
+
 func _hand_card_dimensions() -> Vector2:
 	var viewport_scale := clampf(get_viewport_rect().size.y / 720.0, 0.90, 1.0)
-	var card_width := 57.0 * viewport_scale
-	return Vector2(card_width, card_width * 1.08)
+	var metrics := _card_stack_metrics(57.0 * viewport_scale)
+	return Vector2(metrics.get("width", 57.0), metrics.get("visible_height", 57.0))
 
 func _update_free_hand_track_rect(track: Control) -> void:
 	if is_instance_valid(track):
@@ -1693,7 +1871,7 @@ func _hand_group_positions_by_id(groups: Array, area: Control, card_width: float
 	var group_gap := minf(card_width * 1.18, maxf(5.0, (available - card_width) / maxf(float(group_count - 1), 1.0)))
 	var total_width := card_width + group_gap * maxf(float(group_count - 1), 0.0)
 	var start_x := maxf(8.0, (area.size.x - total_width) * 0.5)
-	var vertical_step := card_height + maxf(3.0, card_width * 0.06)
+	var vertical_step := float(_card_stack_metrics(card_width).get("step", card_height))
 	for group_index in group_count:
 		var group: Dictionary = groups[group_index]
 		var group_cards: Array = group.get("cards", [])
@@ -1737,14 +1915,6 @@ func _build_draggable_card(card: Dictionary, card_width: float, card_height: flo
 	if locked:
 		art.modulate = Color(0.37, 0.40, 0.38, 0.96)
 	button.add_child(art)
-	if locked:
-		var lock_badge := Label.new()
-		lock_badge.text = "锁"
-		lock_badge.position = Vector2(3, 3)
-		lock_badge.add_theme_font_size_override("font_size", 10)
-		lock_badge.add_theme_color_override("font_color", Color("c4d0c7"))
-		lock_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		button.add_child(lock_badge)
 	if interactive:
 		button.gui_input.connect(func(event: InputEvent): _on_free_card_gui_input(event, card_id))
 		button.pressed.connect(func(): _on_free_card_pressed(card_id))
@@ -2140,7 +2310,7 @@ func _animate_hand_slots(drop_target: Dictionary) -> void:
 			continue
 		var node: Control = _free_hand_card_nodes[card_id]
 		if is_instance_valid(node) and targets.has(card_id):
-			_hand_slot_tween.tween_property(node, "position", Vector2(targets[card_id]), 0.14).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			_hand_slot_tween.tween_property(node, "position", Vector2(targets[card_id]), ANIMATION_DURATION_SECONDS).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 func _finish_hand_drag(pointer_position: Vector2) -> void:
 	if not _dragging:
@@ -2343,7 +2513,7 @@ func debug_validate_opponent_public_card_text() -> bool:
 		var column: Node = row.get_child(0).get_node("Margin/Cards")
 		if column.get_child_count() == 2:
 			face = column.get_child(0) as Control
-	var valid := face != null and face.name.begins_with("PublicCardFace") and face.custom_minimum_size == Vector2(31.0, 30.0)
+	var valid := face != null and face.name.begins_with("PublicCardFace") and face.custom_minimum_size == Vector2(PUBLIC_MELD_CARD_WIDTH, PUBLIC_MELD_CARD_VISIBLE_HEIGHT)
 	row.free()
 	return valid
 
@@ -2369,15 +2539,18 @@ func debug_validate_public_meld_layout_consistency() -> bool:
 	var opponent_grid := opponent_row as GridContainer
 	var row_gap := opponent_grid.get_theme_constant("h_separation") if opponent_grid != null else -999
 	var column_gap := opponent_grid.get_theme_constant("v_separation") if opponent_grid != null else -999
+	var public_metrics := _card_stack_metrics(PUBLIC_MELD_CARD_WIDTH)
+	var expected_public_width := maxf(PUBLIC_MELD_GROUP_WIDTH, float(public_metrics.get("width", PUBLIC_MELD_CARD_WIDTH)) + 6.0)
+	var expected_public_height := float(public_metrics.get("visible_height", PUBLIC_MELD_CARD_VISIBLE_HEIGHT)) + 2.0 * float(public_metrics.get("step", PUBLIC_MELD_CARD_STEP)) + 6.0
 	var opponent_layout_ok := opponent_row.get_child_count() == 2 \
 		and opponent_grid != null \
 		and opponent_grid.columns == 4 \
 		and opponent_group != null \
-		and opponent_group.custom_minimum_size.x == 37.0 \
-		and opponent_group.custom_minimum_size.y == 96.0 \
+		and is_equal_approx(opponent_group.custom_minimum_size.x, expected_public_width) \
+		and is_equal_approx(opponent_group.custom_minimum_size.y, expected_public_height) \
 		and opponent_face != null \
-		and opponent_face.custom_minimum_size == Vector2(31.0, 30.0) \
-		and opponent_inner_gap == 0 \
+		and opponent_face.custom_minimum_size == Vector2(PUBLIC_MELD_CARD_WIDTH, PUBLIC_MELD_CARD_VISIBLE_HEIGHT) \
+		and opponent_inner_gap == -int(roundf(float(public_metrics.get("visible_height", PUBLIC_MELD_CARD_VISIBLE_HEIGHT)) - float(public_metrics.get("step", PUBLIC_MELD_CARD_STEP)))) \
 		and row_gap == 7 \
 		and column_gap == 6
 
@@ -2487,6 +2660,103 @@ func debug_validate_human_draw_auto_advance() -> bool:
 
 func debug_validate_ai_action_delay() -> bool:
 	return AI_ACTION_DELAY_SECONDS >= 1.0
+
+func debug_validate_action_animation_duration() -> bool:
+	return is_equal_approx(ANIMATION_DURATION_SECONDS, 1.0) \
+		and is_equal_approx(ACTION_ANIMATION_SECONDS, 1.0) \
+		and is_equal_approx(ACTION_TEXT_ANIMATION_SECONDS, 1.0) \
+		and is_equal_approx(RESPONSE_ANIMATION_HOLD_SECONDS, 1.0)
+
+func _action_animation_timeline(action_type: String) -> Dictionary:
+	var is_response_action := action_type in ["chi", "peng", "zhao", "hu"]
+	return {
+		"pending_hold": RESPONSE_ANIMATION_HOLD_SECONDS if is_response_action else 0.0,
+		"action_text_delay": 0.0,
+		"action_text_duration": ACTION_TEXT_ANIMATION_SECONDS,
+		"card_flight_delay": ACTION_TEXT_ANIMATION_SECONDS if is_response_action else 0.0,
+		"card_flight_duration": ACTION_ANIMATION_SECONDS,
+		"total": RESPONSE_ANIMATION_HOLD_SECONDS + ACTION_TEXT_ANIMATION_SECONDS + ACTION_ANIMATION_SECONDS if is_response_action else ACTION_ANIMATION_SECONDS,
+	}
+
+func debug_validate_response_animation_timeline() -> bool:
+	var response := _action_animation_timeline("chi")
+	var ordinary := _action_animation_timeline("discard")
+	return is_equal_approx(float(response.get("pending_hold", 0.0)), 1.0) \
+		and is_equal_approx(float(response.get("action_text_delay", -1.0)), 0.0) \
+		and is_equal_approx(float(response.get("action_text_duration", 0.0)), 1.0) \
+		and is_equal_approx(float(response.get("card_flight_delay", 0.0)), 1.0) \
+		and is_equal_approx(float(response.get("card_flight_duration", 0.0)), 1.0) \
+		and is_equal_approx(float(response.get("total", 0.0)), 3.0) \
+		and is_equal_approx(float(ordinary.get("pending_hold", -1.0)), 0.0) \
+		and is_equal_approx(float(ordinary.get("card_flight_delay", -1.0)), 0.0) \
+		and is_equal_approx(float(ordinary.get("total", 0.0)), 1.0)
+
+func _action_animation_minimum_wait_seconds(action_type: String) -> float:
+	return maxf(AI_ACTION_DELAY_SECONDS, float(_action_animation_timeline(action_type).get("total", ANIMATION_DURATION_SECONDS)) + ANIMATION_CHAIN_BUFFER_SECONDS)
+
+func debug_validate_animation_chain_delay() -> bool:
+	return is_equal_approx(_action_animation_minimum_wait_seconds("discard"), AI_ACTION_DELAY_SECONDS) \
+		and is_equal_approx(_action_animation_minimum_wait_seconds("chi"), 3.15)
+
+func debug_validate_discard_zone_lock_snapshot() -> bool:
+	var active := {"id": "discard-active", "rank": "陆", "value": 6, "size": "small"}
+	var archived := {"id": "discard-archived", "rank": "玖", "value": 9, "size": "big"}
+	var already_claimed := {"id": "discard-claimed", "rank": "伍", "value": 5, "size": "small"}
+	var response := {
+		"phase": "response_collecting",
+		"pendingCardSource": "discard",
+		"players": [{"cards": [], "melds": []}, {"cards": [], "melds": []}, {"cards": [], "melds": []}],
+		"discardPile": {
+			"lastDiscard": active,
+			"lastDiscardPlayerIndex": 1,
+			"cards": [archived, active],
+			"discardHistory": [
+				{"card": already_claimed, "playerIndex": 1},
+				{"card": archived, "playerIndex": 1},
+				{"card": active, "playerIndex": 1},
+			],
+		},
+	}
+	var entries := _discard_zone_archive_entries(response, 1, "discard-active")
+	var center := _build_center(response, false)
+	var pending_nodes := _subtree_group_nodes(center, "live_discard_pending")
+	var pending_art := pending_nodes[0] as Control if not pending_nodes.is_empty() else null
+	var after_response := response.duplicate(true)
+	after_response["phase"] = "drawing"
+	after_response.erase("pendingCardSource")
+	after_response["discardPile"]["lastDiscard"] = null
+	after_response["discardPile"]["lastDiscardPlayerIndex"] = -1
+	after_response["discardPile"]["cards"] = [archived]
+	var after_entries := _discard_zone_archive_entries(after_response, 1, "")
+	var valid := entries.size() == 1 \
+		and str(Dictionary(entries[0]).get("card", {}).get("id", "")) == "discard-archived" \
+		and pending_art != null \
+		and pending_art.modulate.is_equal_approx(DISCARD_PENDING_MODULATE) \
+		and after_entries.size() == 1 \
+		and str(Dictionary(after_entries[0]).get("card", {}).get("id", "")) == "discard-archived"
+	center.free()
+	return valid
+
+func debug_validate_response_animation_hold() -> bool:
+	var target := {"id": "response-target", "rank": "陆", "value": 6, "size": "small"}
+	var previous := {
+		"phase": "response_collecting",
+		"pendingCardSource": "discard",
+		"players": [{"playerId": "player_0"}, {"playerId": "player_1"}, {"playerId": "player_2"}],
+		"discardPile": {"lastDiscard": target, "lastDiscardPlayerIndex": 2},
+	}
+	var current := {"phase": "discarding", "players": previous["players"], "discardPile": {}}
+	var hold := _response_animation_hold_for_action({"type": "chi", "playerId": "player_1"}, previous, current)
+	return str(Dictionary(hold.get("card", {})).get("id", "")) == "response-target" \
+		and int(hold.get("playerIndex", -1)) == 2 \
+		and is_equal_approx(float(hold.get("duration", 0.0)), 1.0)
+
+func debug_validate_animation_generation_guard() -> bool:
+	var previous := _action_animation_generation
+	var first := _next_action_animation_generation()
+	var second := _next_action_animation_generation()
+	_action_animation_generation = previous
+	return second == first + 1
 
 func debug_validate_response_without_actions() -> bool:
 	var pass_only := {
@@ -2783,11 +3053,21 @@ func _submit_available_action(available: Dictionary) -> void:
 func _submit_available_option(available: Dictionary, chi_option: Dictionary = {}, hu_option: Dictionary = {}) -> void:
 	if _advice_loading or _ai_advancing or _ai_demo_running:
 		return
-	var action := _build_available_option_payload(available, chi_option, hu_option)
+	var authoritative := _authoritative_available_action(available, chi_option, hu_option)
+	if authoritative.is_empty():
+		_show_game_after_stale_action()
+		return
+	var action := _build_available_option_payload(authoritative, chi_option, hu_option)
 	if action.is_empty():
-		_show_toast("该动作选项已失效，请按当前局面重新选择。")
+		_show_game_after_stale_action()
 		return
 	AIService.submit_action(action)
+
+func _show_game_after_stale_action() -> void:
+	option_popup.hide()
+	_show_toast("响应局面已更新，已按最新牌局刷新。", 2.5)
+	if page == "game":
+		show_game()
 
 # Only payloads backed by the displayed core action may cross the UI boundary.
 func _build_available_option_payload(available: Dictionary, chi_option: Dictionary = {}, hu_option: Dictionary = {}) -> Dictionary:
@@ -2829,6 +3109,21 @@ func debug_validate_option_payloads() -> bool:
 	var selected_hu := _build_available_option_payload(hu_available, {}, hu_b)
 	return str(selected_hu.get("huOptionId", "")) == "hu-b" and Array(selected_hu.get("cards", []))[0].get("id", "") == "h2"
 
+func debug_validate_authoritative_action_rebind() -> bool:
+	var previous_state := AIService.latest_state.duplicate(true)
+	AIService.latest_state = {
+		"availableActions": [{
+			"type": "chi",
+			"cards": [],
+			"chiOptions": [{"id": "current-option", "selectedCards": []}],
+		}],
+	}
+	var stale := {"type": "chi", "chiOptions": [{"id": "stale-option"}]}
+	var current := _authoritative_available_action(stale, {"id": "current-option"}, {})
+	var rejected := _authoritative_available_action(stale, {"id": "stale-option"}, {})
+	AIService.latest_state = previous_state
+	return str(current.get("type", "")) == "chi" and rejected.is_empty()
+
 func _run_ai_until_human() -> void:
 	if _ai_advancing:
 		return
@@ -2846,7 +3141,7 @@ func _run_ai_until_human() -> void:
 			show_game()
 			return
 		if not AIService.latest_state.is_empty() and not bool(AIService.latest_state.get("isGameOver", false)):
-			await get_tree().create_timer(AI_ACTION_DELAY_SECONDS).timeout
+			await get_tree().create_timer(_action_animation_wait_seconds()).timeout
 	_ai_advancing = false
 	if guard >= 24:
 		_show_toast("AI 推进已暂停，请检查当前牌局。", 4.0)
@@ -3030,7 +3325,7 @@ func _auto_advance_if_needed() -> void:
 	if bool(state.get("isGameOver", false)) or _state_awaiting_human(state):
 		return
 	# 保留上一动作的牌面结果，避免收到状态后立即被下一次 AI 请求覆盖。
-	await get_tree().create_timer(AI_ACTION_DELAY_SECONDS).timeout
+	await get_tree().create_timer(_action_animation_wait_seconds()).timeout
 	if not debug_should_auto_advance(AIService.latest_state):
 		return
 	await _run_ai_until_human()
@@ -3175,38 +3470,33 @@ func debug_validate_hand_arrangement_toggle() -> bool:
 	AppState.settings["auto_sort_hand"] = true
 	return grouped_after_manual and grouped_after_repeat
 
-func _show_option_picker(title_text: String, available: Dictionary, options: Array, option_kind: String) -> void:
+func _show_option_picker(_title_text: String, available: Dictionary, options: Array, option_kind: String) -> void:
 	for child in option_popup.get_children():
-			child.queue_free()
-	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", 10)
+		child.queue_free()
+	var body := HBoxContainer.new()
+	body.name = "OptionPickerGroups"
+	body.alignment = BoxContainer.ALIGNMENT_CENTER
+	body.add_theme_constant_override("separation", 8)
 	option_popup.add_child(body)
-	var title_label := Label.new()
-	title_label.text = title_text
-	title_label.add_theme_font_size_override("font_size", 20)
-	title_label.add_theme_color_override("font_color", INK)
-	body.add_child(title_label)
-	var hint := Label.new()
-	hint.text = "点击牌组选择组合；牌面以当前规则服务返回的真实牌张显示"
-	hint.add_theme_font_size_override("font_size", 12)
-	hint.add_theme_color_override("font_color", Color("675d4f"))
-	body.add_child(hint)
 	var picker_entries: Array = _merge_chi_picker_options(options) if option_kind == "chi" else options.map(func(raw_option: Dictionary) -> Dictionary:
 		return {"option": Dictionary(raw_option).duplicate(true), "count": 1}
 	)
 	for index in picker_entries.size():
-			var entry: Dictionary = picker_entries[index]
-			var option: Dictionary = Dictionary(entry.get("option", {})).duplicate(true)
-			var selected_cards: Array = Array(option.get("selectedCards", []))
-			var display_cards: Array = _sorted_human_cards(Array(option.get("mainMeldCards", selected_cards)))
-			var action_name := _action_text(str(available.get("type", option_kind)))
-			var option_button := _option_picker_card_button(action_name, index + 1, display_cards, selected_cards, func():
-				option_popup.hide()
-				if option_kind == "chi": _submit_available_option(available, option, {})
-				else: _submit_available_option(available, {}, option)
-			, int(entry.get("count", 1)))
-			body.add_child(option_button)
-	body.add_child(_quiet_button("取消", func(): option_popup.hide()))
+		var entry: Dictionary = picker_entries[index]
+		var option: Dictionary = Dictionary(entry.get("option", {})).duplicate(true)
+		var selected_cards: Array = Array(option.get("selectedCards", []))
+		var display_cards: Array = _sorted_human_cards(Array(option.get("mainMeldCards", selected_cards)))
+		var action_name := _action_text(str(available.get("type", option_kind)))
+		var picker_payload := {"available": available, "option": option, "optionKind": option_kind}
+		var option_callback := _make_action_snapshot_callback(picker_payload, func(payload: Dictionary):
+			option_popup.hide()
+			var available_snapshot: Dictionary = Dictionary(payload.get("available", {}))
+			var option_snapshot: Dictionary = Dictionary(payload.get("option", {}))
+			if str(payload.get("optionKind", "")) == "chi": _submit_available_option(available_snapshot, option_snapshot, {})
+			else: _submit_available_option(available_snapshot, {}, option_snapshot)
+		)
+		var option_button := _option_picker_card_button(action_name, index + 1, display_cards, selected_cards, option_callback, int(entry.get("count", 1)))
+		body.add_child(option_button)
 	option_popup.reset_size()
 	option_popup.popup_centered()
 
@@ -3236,58 +3526,76 @@ func _merge_chi_picker_options(options: Array) -> Array:
 			entries.append({"option": option, "count": 1, "displayKey": key})
 	return entries
 
-func _option_picker_card_button(action_name: String, option_index: int, display_cards: Array, selected_cards: Array, callback: Callable, same_count: int = 1) -> Button:
+func _make_action_snapshot_callback(action: Dictionary, receiver: Callable) -> Callable:
+	var snapshot: Dictionary = action.duplicate(true)
+	return func(): receiver.call(snapshot)
+
+func _option_picker_card_button(_action_name: String, option_index: int, display_cards: Array, _selected_cards: Array, callback: Callable, _same_count: int = 1) -> Button:
 	var button := Button.new()
 	button.name = "OptionCardButton_%d" % option_index
 	button.text = ""
-	button.custom_minimum_size = Vector2(300, 152)
-	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	button.add_theme_stylebox_override("normal", _box(Color("eadfc9"), 5, 5, Color("b7a27d"), 1))
-	button.add_theme_stylebox_override("hover", _box(Color("fff7e8"), 5, 5, GOLD, 2))
-	button.add_theme_stylebox_override("pressed", _box(Color("f5cd77"), 5, 5, RED, 2))
+	var stack_metrics := _card_stack_metrics(PICKER_CARD_WIDTH)
+	var group_width := float(stack_metrics.get("width", PICKER_CARD_WIDTH))
+	var visible_height := float(stack_metrics.get("visible_height", PICKER_CARD_VISIBLE_HEIGHT))
+	var stack_step := float(stack_metrics.get("step", visible_height))
+	var group_height := visible_height + maxf(float(display_cards.size() - 1) * stack_step, 0.0)
+	button.custom_minimum_size = Vector2(group_width, group_height)
+	button.size = button.custom_minimum_size
+	button.flat = true
+	button.mouse_filter = Control.MOUSE_FILTER_STOP
+	button.focus_mode = Control.FOCUS_ALL
+	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	button.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+	button.add_theme_stylebox_override("hover", StyleBoxEmpty.new())
+	button.add_theme_stylebox_override("pressed", StyleBoxEmpty.new())
 	var margin := MarginContainer.new()
 	margin.name = "OptionCardMargin"
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 8)
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 0)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	button.add_child(margin)
 	var row := HBoxContainer.new()
 	row.name = "OptionCardRow"
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 12)
+	row.add_theme_constant_override("separation", 0)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.add_child(row)
-	var badge := Label.new()
-	badge.text = "%s %d%s" % [action_name, option_index, " ×%d" % same_count if same_count > 1 else ""]
-	badge.custom_minimum_size.x = 58
-	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	badge.add_theme_font_size_override("font_size", 15)
-	badge.add_theme_color_override("font_color", RED)
-	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(badge)
 	var faces := VBoxContainer.new()
 	faces.name = "OptionCardFaces"
-	faces.alignment = BoxContainer.ALIGNMENT_CENTER
-	faces.add_theme_constant_override("separation", int(PICKER_CARD_STEP - PICKER_CARD_VISIBLE_HEIGHT))
-	faces.custom_minimum_size = Vector2(PICKER_CARD_WIDTH, PICKER_CARD_VISIBLE_HEIGHT + maxf(float(display_cards.size() - 1) * PICKER_CARD_STEP, 0.0))
+	faces.alignment = BoxContainer.ALIGNMENT_END
+	faces.add_theme_constant_override("separation", -int(roundf(visible_height - stack_step)))
+	faces.custom_minimum_size = Vector2(group_width, group_height)
 	faces.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for raw_card in display_cards:
-			var card: Dictionary = raw_card
-			var face := _cropped_hand_card_art(card, PICKER_CARD_WIDTH, PICKER_CARD_VISIBLE_HEIGHT)
-			face.name = "OptionCardFace"
-			face.tooltip_text = _card_size_text(card)
-			faces.add_child(face)
+		var card: Dictionary = raw_card
+		var face := _cropped_hand_card_art(card, group_width, visible_height)
+		face.name = "OptionCardFace"
+		face.tooltip_text = _card_size_text(card)
+		faces.add_child(face)
 	row.add_child(faces)
-	var detail := Label.new()
-	detail.text = _cards_text(selected_cards)
-	detail.custom_minimum_size.x = 74
-	detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	detail.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	detail.add_theme_font_size_override("font_size", 14)
-	detail.add_theme_color_override("font_color", INK)
-	detail.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(detail)
-	button.pressed.connect(callback)
+	# Keep the whole stacked group clickable. The cropped card controls are
+	# intentionally mouse-transparent, but the explicit pointer path prevents a
+	# visible top card from swallowing the Button release and timing out to pass.
+	var pointer_down: bool = false
+	var pointer_callback_fired: bool = false
+	button.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				pointer_down = true
+				pointer_callback_fired = false
+			elif pointer_down:
+				pointer_down = false
+				pointer_callback_fired = true
+				callback.call()
+				get_viewport().set_input_as_handled()
+	)
+	button.pressed.connect(func():
+		if pointer_down:
+			return
+		if pointer_callback_fired:
+			pointer_callback_fired = false
+			return
+		callback.call()
+	)
 	return button
 
 func debug_validate_option_picker_grouping() -> bool:
@@ -3335,7 +3643,8 @@ func debug_validate_option_picker_grouping() -> bool:
 	var button := _option_picker_card_button("��", 1, display_cards, representative.get("selectedCards", []), func(): return, 2)
 	var faces := button.get_node_or_null("OptionCardMargin/OptionCardRow/OptionCardFaces") as VBoxContainer
 	var payload := _build_available_option_payload({"type": "chi", "cards": [], "chiOptions": [first, duplicate]}, representative)
-	var valid := faces != null and faces.get_child_count() == 3 and faces.get_theme_constant("separation") < 0 and str(payload.get("chiOptionId", "")) == "chi-representative"
+	var row := button.get_node_or_null("OptionCardMargin/OptionCardRow") as HBoxContainer
+	var valid := faces != null and row != null and row.get_child_count() == 1 and faces.get_child_count() == 3 and faces.get_theme_constant("separation") < 0 and button.get_theme_stylebox("normal") is StyleBoxEmpty and str(payload.get("chiOptionId", "")) == "chi-representative"
 	button.free()
 	return valid
 
@@ -3364,6 +3673,178 @@ func debug_validate_option_picker_card_art() -> bool:
 				valid = false
 				break
 	button.free()
+	return valid
+
+func debug_validate_bao_picker_card_face() -> bool:
+	var state := {
+		"phase": "discarding",
+		"currentPlayerIndex": 0,
+		"activePlayerIndex": 0,
+		"awaitingHumanInput": true,
+		"isGameOver": false,
+		"availableActions": [
+			{"type": "bao", "cards": [{"id": "bao-small-1", "value": 1, "size": "small"}]},
+			{"type": "bao", "cards": [{"id": "bao-big-1", "value": 1, "size": "big"}]},
+		],
+	}
+	var row := _build_center_actions(state)
+	if row == null:
+		return false
+	var buttons := row.get_children()
+	var first := buttons[0] as Button if buttons.size() > 0 else null
+	var second := buttons[1] as Button if buttons.size() > 1 else null
+	var first_faces := first.get_node_or_null("OptionCardMargin/OptionCardRow/OptionCardFaces") as VBoxContainer if first != null else null
+	var second_faces := second.get_node_or_null("OptionCardMargin/OptionCardRow/OptionCardFaces") as VBoxContainer if second != null else null
+	var first_art := first_faces.get_child(0) as Control if first_faces != null and first_faces.get_child_count() == 1 else null
+	var second_art := second_faces.get_child(0) as Control if second_faces != null and second_faces.get_child_count() == 1 else null
+	var first_root := first_art.get_child(0) as Control if first_art != null and first_art.get_child_count() > 0 else null
+	var second_root := second_art.get_child(0) as Control if second_art != null and second_art.get_child_count() > 0 else null
+	var first_texture := first_root.get_child(0) as TextureRect if first_root != null and first_root.get_child_count() > 0 else null
+	var second_texture := second_root.get_child(0) as TextureRect if second_root != null and second_root.get_child_count() > 0 else null
+	var valid := first != null \
+		and second != null \
+		and first.text.is_empty() \
+		and second.text.is_empty() \
+		and first.get_theme_stylebox("normal") is StyleBoxEmpty \
+		and second.get_theme_stylebox("normal") is StyleBoxEmpty \
+		and first.tooltip_text == "小1" \
+		and second.tooltip_text == "大1" \
+		and first_texture != null \
+		and second_texture != null \
+		and first_texture.texture != null \
+		and second_texture.texture != null \
+		and first_texture.texture != second_texture.texture
+	row.free()
+	return valid
+
+func debug_validate_pending_discard_highlight() -> bool:
+	var pending := {"id": "pending-highlight", "rank": "二", "value": 2, "size": "small"}
+	var state := {
+		"phase": "response_collecting",
+		"pendingCardSource": "discard",
+		"players": [{"cards": [], "melds": []}, {"cards": [], "melds": []}, {"cards": [], "melds": []}],
+		"discardPile": {
+			"lastDiscard": pending,
+			"lastDiscardPlayerIndex": 1,
+			"cards": [pending],
+			"discardHistory": [],
+		},
+	}
+	var center := _build_center(state, false)
+	var pending_nodes := _subtree_group_nodes(center, "live_discard_pending")
+	var pending_art := pending_nodes[0] as Control if not pending_nodes.is_empty() else null
+	var valid := pending_art != null \
+		and pending_art.size == DISCARD_PENDING_CARD_SIZE \
+		and pending_art.modulate.is_equal_approx(DISCARD_PENDING_MODULATE)
+	center.free()
+	return valid
+
+func debug_validate_bao_action_binding() -> bool:
+	var actions: Array = [
+		{"type": "bao", "cards": [{"id": "bao-small-2-a", "value": 2, "size": "big"}]},
+		{"type": "bao", "cards": [{"id": "bao-small-2-b", "value": 2, "size": "big"}]},
+		{"type": "bao", "cards": [{"id": "bao-big-5", "value": 5, "size": "big"}]},
+		{"type": "bao", "cards": [{"id": "bao-big-8", "value": 8, "size": "big"}]},
+	]
+	var chosen: Array[String] = []
+	var buttons: Array[Button] = []
+	for raw_action in actions:
+		var action: Dictionary = raw_action
+		var button := Button.new()
+		var callback := _make_action_snapshot_callback(action, func(payload: Dictionary):
+			var cards: Array = payload.get("cards", [])
+			if not cards.is_empty():
+				chosen.append(str(Dictionary(cards[0]).get("id", "")))
+		)
+		button.pressed.connect(callback)
+		buttons.append(button)
+	for button in buttons:
+		button.pressed.emit()
+		button.free()
+	var previous_state := AIService.latest_state.duplicate(true)
+	AIService.latest_state = {"availableActions": actions}
+	var selected_authoritative := _authoritative_available_action(actions[2])
+	var selected_payload := _build_available_option_payload(selected_authoritative)
+	AIService.latest_state = previous_state
+	var selected_card_id := str(Array(selected_payload.get("cards", [])).front().get("id", "")) if not Array(selected_payload.get("cards", [])).is_empty() else ""
+	var selected_correctly := selected_card_id == "bao-big-5"
+	var state := {
+		"phase": "discarding",
+		"currentPlayerIndex": 0,
+		"activePlayerIndex": 0,
+		"awaitingHumanInput": true,
+		"isGameOver": false,
+		"availableActions": actions,
+	}
+	var row := _build_center_actions(state)
+	var rendered := row != null and row.get_child_count() == 3
+	if rendered:
+		var visible_cards: Array[String] = []
+		for child in row.get_children():
+			var option_button := child as Button
+			visible_cards.append(option_button.tooltip_text if option_button != null else "")
+		rendered = visible_cards == ["大2", "大5", "大8"]
+	if row != null:
+		row.free()
+	return chosen == ["bao-small-2-a", "bao-small-2-b", "bao-big-5", "bao-big-8"] and selected_correctly and rendered
+
+func debug_validate_discard_entry_scoping() -> bool:
+	var old_card := {"id": "old-card", "rank": "陆", "value": 6, "size": "big"}
+	var latest_card := {"id": "latest-card", "rank": "捌", "value": 8, "size": "big"}
+	var state := {
+		"phase": "drawing",
+		"discardPile": {
+			"lastDiscard": latest_card,
+			"lastDiscardPlayerIndex": 1,
+			"cards": [old_card, latest_card],
+			"discardHistory": [],
+		},
+	}
+	var player_zero_entries := _discard_zone_archive_entries(state, 0, "")
+	var player_one_entries := _discard_zone_archive_entries(state, 1, "")
+	return player_zero_entries.is_empty() \
+		and player_one_entries.size() == 1 \
+		and str(Dictionary(player_one_entries[0]).get("card", {}).get("id", "")) == "latest-card"
+
+func debug_validate_stack_visibility() -> bool:
+	return CARD_STACK_STEP_RATIO >= 0.80 \
+		and is_equal_approx(PUBLIC_MELD_CARD_VISIBLE_HEIGHT, PUBLIC_MELD_CARD_WIDTH * CARD_STACK_VISIBLE_HEIGHT_RATIO) \
+		and is_equal_approx(PICKER_CARD_VISIBLE_HEIGHT, PICKER_CARD_WIDTH * CARD_STACK_VISIBLE_HEIGHT_RATIO)
+
+func debug_validate_no_lock_label() -> bool:
+	var button := _build_draggable_card({"id": "locked-card", "value": 5, "size": "big"}, 26.0, 26.0, false, false, true)
+	var has_lock_label := false
+	for child in button.get_children():
+		if child is Label and str((child as Label).text) == "锁":
+			has_lock_label = true
+	button.free()
+	return not has_lock_label
+
+func debug_validate_discard_archive_height() -> bool:
+	var active := {"id": "archive-active", "rank": "陆", "value": 6, "size": "big"}
+	var previous := {
+		"phase": "response_collecting",
+		"pendingCardSource": "discard",
+		"discardPile": {"lastDiscard": active, "lastDiscardPlayerIndex": 1},
+	}
+	var current := {
+		"phase": "drawing",
+		"discardPile": {
+			"lastDiscard": {},
+			"lastDiscardPlayerIndex": -1,
+			"cards": [active],
+			"discardHistory": [{"card": active, "playerIndex": 1, "source": "discard"}],
+		},
+	}
+	var center := _build_center(current, false)
+	add_child(center)
+	_animate_live_table_update(0, true, previous, current)
+	var archived_nodes := _subtree_group_nodes(center, "live_discard_archived")
+	var archived := archived_nodes[0] as Control if not archived_nodes.is_empty() else null
+	var valid := archived != null \
+		and archived.size == Vector2(DISCARD_ARCHIVE_CARD_WIDTH, DISCARD_ARCHIVE_CARD_HEIGHT) \
+		and archived.scale.is_equal_approx(Vector2.ONE)
+	center.free()
 	return valid
 
 func _show_decision_panel(decision: Dictionary) -> void:
@@ -3564,7 +4045,7 @@ func show_replay() -> void:
 	summary.offset_right = -14
 	summary.offset_bottom = 64
 	frame.add_child(summary)
-	var surface := _build_table_surface(state, false)
+	var surface := _build_table_surface(state, false, true)
 	surface.set_anchors_preset(Control.PRESET_FULL_RECT)
 	surface.offset_top = 60
 	surface.offset_bottom = 0
@@ -3643,6 +4124,88 @@ func debug_validate_replay_status() -> bool:
 func debug_validate_replay_decision_access() -> bool:
 	var ai_step := {"decision": {"trace": {"policySource": "learned", "chosenAction": "discard"}}}
 	return _replay_step_decision(ai_step).get("trace", {}).get("chosenAction", "") == "discard" and _replay_step_decision({}).is_empty()
+
+func debug_validate_replay_opponent_hands() -> bool:
+	var cards: Array = [
+		{"id": "replay-p1-s1", "value": 1, "size": "small"},
+		{"id": "replay-p1-s2", "value": 2, "size": "small"},
+		{"id": "replay-p1-s3", "value": 3, "size": "small"},
+	]
+	var state := {
+		"currentPlayerIndex": 0,
+		"players": [
+			{"cards": [], "melds": []},
+			{"cards": cards, "melds": []},
+			{"cards": cards.duplicate(true), "melds": []},
+		],
+	}
+	var left := _build_opponent_seat(state, 1, false, true)
+	var right := _build_opponent_seat(state, 2, false, true)
+	var left_hand := left.get_node_or_null("Badge/TableRow/PrivateFan/ReplayHandGroups") as HBoxContainer
+	var right_hand := right.get_node_or_null("Badge/TableRow/PrivateFan/ReplayHandGroups") as HBoxContainer
+	var left_faces := _subtree_group_nodes(left_hand, "replay_hand_card") if left_hand != null else []
+	var right_faces := _subtree_group_nodes(right_hand, "replay_hand_card") if right_hand != null else []
+	var expected_size := Vector2(REPLAY_HAND_CARD_WIDTH, REPLAY_HAND_CARD_VISIBLE_HEIGHT)
+	var valid := left_hand != null \
+		and right_hand != null \
+		and left_hand.get_child_count() == 1 \
+		and right_hand.get_child_count() == 1 \
+		and left_faces.size() == cards.size() \
+		and right_faces.size() == cards.size() \
+		and (left_faces[0] as Control).custom_minimum_size == expected_size \
+		and (right_faces[0] as Control).custom_minimum_size == expected_size \
+		and not _subtree_contains_text(left, "|||") \
+		and not _subtree_contains_text(right, "|||")
+	left.free()
+	right.free()
+	return valid
+
+func debug_validate_replay_hand_group_layout() -> bool:
+	var cards: Array = [
+		{"id": "replay-s1", "value": 1, "size": "small"},
+		{"id": "replay-s2", "value": 2, "size": "small"},
+		{"id": "replay-s3", "value": 3, "size": "small"},
+		{"id": "replay-b5-a", "value": 5, "size": "big"},
+		{"id": "replay-b5-b", "value": 5, "size": "big"},
+		{"id": "replay-b5-c", "value": 5, "size": "big"},
+		{"id": "replay-s9", "value": 9, "size": "small"},
+	]
+	var row := _build_replay_hand_groups(cards)
+	var groups := _hand_groups(cards)
+	var metrics := _card_stack_metrics(REPLAY_HAND_CARD_WIDTH)
+	var visible_height := float(metrics.get("visible_height", REPLAY_HAND_CARD_VISIBLE_HEIGHT))
+	var stack_step := float(metrics.get("step", REPLAY_HAND_CARD_VISIBLE_HEIGHT * CARD_STACK_STEP_RATIO))
+	var valid := row.get_child_count() == groups.size() \
+		and row.get_child_count() < cards.size() \
+		and row.get_theme_constant("separation") == int(REPLAY_HAND_GROUP_GAP)
+	for group_index in row.get_child_count():
+		var column := row.get_child(group_index) as VBoxContainer
+		var group_cards: Array = Array(Dictionary(groups[group_index]).get("cards", []))
+		var expected_height := visible_height + maxf(float(group_cards.size() - 1) * stack_step, 0.0)
+		valid = valid \
+			and column != null \
+			and column.get_child_count() == group_cards.size() \
+			and column.get_theme_constant("separation") < 0 \
+			and column.custom_minimum_size.y >= expected_height
+		for card_index in column.get_child_count():
+			var face := column.get_child(card_index) as Control
+			valid = valid \
+				and face != null \
+				and face.is_in_group("replay_hand_card") \
+				and face.custom_minimum_size == Vector2(REPLAY_HAND_CARD_WIDTH, REPLAY_HAND_CARD_VISIBLE_HEIGHT)
+	var state := {"players": [{"cards": cards, "melds": []}, {"cards": [], "melds": []}, {"cards": [], "melds": []}]}
+	var player_area := _build_player_area(state, false, true)
+	var slot := player_area.get_node("Panel/Body/FreeHandSlot") as Control
+	var player_row := slot.get_child(0) as HBoxContainer if slot.get_child_count() > 0 else null
+	valid = valid and player_row != null and player_row.name == "ReplayHandGroups"
+	var surface := _build_table_surface(state, false, true)
+	var surface_left_hand := surface.get_node_or_null("OpponentLeftSlot/OpponentSeat/Badge/TableRow/PrivateFan/ReplayHandGroups") as HBoxContainer
+	var surface_right_hand := surface.get_node_or_null("OpponentRightSlot/OpponentSeat/Badge/TableRow/PrivateFan/ReplayHandGroups") as HBoxContainer
+	valid = valid and surface_left_hand != null and surface_right_hand != null
+	row.free()
+	player_area.free()
+	surface.free()
+	return valid
 
 func _on_state_received(next_state: Dictionary) -> void:
 	_previous_live_animation_positions = _capture_live_animation_positions()
@@ -3763,11 +4326,17 @@ func _animation_snapshot_point(snapshot: Dictionary, card_id: String, anchor_key
 		return cards[card_id]
 	return fallback
 
+func _animation_card_or_anchor_point(snapshot: Dictionary, card_id: String, anchor_key: String, fallback: Vector2) -> Vector2:
+	var cards: Dictionary = snapshot.get("cards", {})
+	if not card_id.is_empty() and cards.has(card_id):
+		return cards[card_id]
+	return _animation_snapshot_point(snapshot, card_id, anchor_key, fallback)
+
 func _animation_flight_points(card: Dictionary, start_anchor: String, end_anchor: String, previous_points: Dictionary, current_points: Dictionary, start_fallback: Vector2, end_fallback: Vector2) -> Dictionary:
 	var card_id := str(card.get("id", ""))
 	return {
-		"start": _animation_snapshot_point(previous_points, card_id, start_anchor, start_fallback),
-		"end": _animation_snapshot_point(current_points, card_id, end_anchor, end_fallback),
+		"start": _animation_card_or_anchor_point(previous_points, card_id, start_anchor, start_fallback),
+		"end": _animation_card_or_anchor_point(current_points, card_id, end_anchor, end_fallback),
 	}
 
 func _action_animation_route(action_type: String) -> String:
@@ -3828,6 +4397,19 @@ func debug_validate_animation_position_routes() -> bool:
 
 func debug_validate_animation_anchor_priority() -> bool:
 	var previous := {
+		"cards": {},
+		"anchors": {"discard_2": Vector2(40, 40)},
+	}
+	var current := {
+		"cards": {},
+		"anchors": {"meld_1": Vector2(240, 120)},
+	}
+	var points := _animation_flight_points({"id": "target-card"}, "discard_2", "meld_1", previous, current, Vector2.ZERO, Vector2.ZERO)
+	return points.get("start", Vector2.ZERO) == Vector2(40, 40) \
+			and points.get("end", Vector2.ZERO) == Vector2(240, 120)
+
+func debug_validate_animation_card_endpoint_contract() -> bool:
+	var previous := {
 		"cards": {"target-card": Vector2(12, 12)},
 		"anchors": {"discard_2": Vector2(40, 40)},
 	}
@@ -3836,8 +4418,8 @@ func debug_validate_animation_anchor_priority() -> bool:
 		"anchors": {"meld_1": Vector2(240, 120)},
 	}
 	var points := _animation_flight_points({"id": "target-card"}, "discard_2", "meld_1", previous, current, Vector2.ZERO, Vector2.ZERO)
-	return points.get("start", Vector2.ZERO) == Vector2(40, 40) \
-			and points.get("end", Vector2.ZERO) == Vector2(240, 120)
+	return points.get("start", Vector2.ZERO) == Vector2(12, 12) \
+			and points.get("end", Vector2.ZERO) == Vector2(13, 13)
 
 func debug_validate_animation_target_routes() -> bool:
 	var target := {"id": "target-card", "value": 6, "size": "small"}
@@ -4054,14 +4636,46 @@ func _spawn_action_card_flight(card: Dictionary, start_point: Vector2, end_point
 	if delay > 0.0:
 		tween.tween_interval(delay)
 	tween.tween_property(art, "global_position", end_point - ACTION_ANIMATION_CARD_SIZE * 0.5, ACTION_ANIMATION_SECONDS).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.parallel().tween_property(art, "scale", Vector2.ONE, ACTION_ANIMATION_SECONDS * 0.75).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tween.parallel().tween_property(art, "modulate:a", 1.0, ACTION_ANIMATION_SECONDS * 0.32)
-	tween.tween_interval(0.10)
-	tween.tween_property(art, "scale", Vector2(0.9, 0.9), 0.10)
+	tween.parallel().tween_property(art, "scale", Vector2.ONE, ACTION_ANIMATION_SECONDS).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(art, "modulate:a", 1.0, ACTION_ANIMATION_SECONDS)
 	tween.tween_callback(func():
 		if is_instance_valid(art):
 			art.queue_free()
 	)
+
+func _animation_card_id_set(cards: Array) -> Dictionary:
+	var ids := {}
+	for raw_card in cards:
+		var card: Dictionary = raw_card
+		var card_id := str(card.get("id", ""))
+		if not card_id.is_empty():
+			ids[card_id] = true
+	return ids
+
+func _set_live_animation_card_visibility(card_ids: Dictionary, visible: bool, keep_pending: bool = false) -> void:
+	if card_ids.is_empty():
+		return
+	for raw_node in get_tree().get_nodes_in_group("live_card_face"):
+		var node := raw_node as Control
+		if node == null or not node.is_inside_tree() or node.is_queued_for_deletion():
+			continue
+		var card_id := str(node.get_meta("animation_card_id", ""))
+		if card_id.is_empty() or not card_ids.has(card_id) or (keep_pending and node.is_in_group("live_discard_pending")):
+			continue
+		if visible:
+			var restore_variant: Variant = node.get_meta("animation_restore_modulate", null)
+			if restore_variant != null and typeof(restore_variant) == TYPE_COLOR:
+				node.modulate = restore_variant
+				node.remove_meta("animation_restore_modulate")
+			else:
+				var restored := node.modulate
+				restored.a = 1.0
+				node.modulate = restored
+		else:
+			node.set_meta("animation_restore_modulate", node.modulate)
+			var hidden := node.modulate
+			hidden.a = 0.0
+			node.modulate = hidden
 
 func _spawn_action_text(action_type: String, player_index: int, point: Vector2, delay: float = 0.0) -> void:
 	if not is_instance_valid(_action_animation_layer):
@@ -4099,6 +4713,14 @@ func _spawn_action_text(action_type: String, player_index: int, point: Vector2, 
 			label.queue_free()
 	)
 
+func _next_action_animation_generation() -> int:
+	_action_animation_generation += 1
+	return _action_animation_generation
+
+func _action_animation_wait_seconds() -> float:
+	var remaining := maxf(0.0, float(_action_animation_ready_at_msec - Time.get_ticks_msec()) / 1000.0)
+	return maxf(AI_ACTION_DELAY_SECONDS, remaining)
+
 func _animate_recorded_action(record: Dictionary, previous_state: Dictionary, current_state: Dictionary) -> void:
 	if page != "game" or previous_state.is_empty() or current_state.is_empty():
 		return
@@ -4110,6 +4732,9 @@ func _animate_recorded_action(record: Dictionary, previous_state: Dictionary, cu
 	var player_index := _action_animation_player_index(action, previous_state, current_state)
 	var previous_points := _previous_live_animation_positions
 	var current_points := _current_live_animation_positions
+	var timeline := _action_animation_timeline(action_type)
+	var action_text_delay := float(timeline.get("action_text_delay", 0.0))
+	var card_flight_delay := float(timeline.get("card_flight_delay", 0.0))
 	var fallback := get_viewport_rect().size * 0.5
 	var deck_point := _animation_snapshot_or_group_point(previous_points, "deck", "live_deck_anchor", fallback)
 	var hand_point := _animation_snapshot_or_group_point(previous_points, "hand_%d" % player_index, "live_hand_source_%d" % player_index, fallback)
@@ -4122,6 +4747,14 @@ func _animate_recorded_action(record: Dictionary, previous_state: Dictionary, cu
 	var cards := _action_animation_cards(action, previous_state, current_state, player_index)
 	if cards.is_empty():
 		return
+	var transition_meld := _new_transition_meld(previous_state, current_state) if action_type in ["draw", "discard", "bao"] else {}
+	var animated_card_ids := _animation_card_id_set(cards)
+	for raw_transition_card in Array(transition_meld.get("cards", [])):
+		var transition_card: Dictionary = raw_transition_card
+		var transition_id := str(transition_card.get("id", ""))
+		if not transition_id.is_empty():
+			animated_card_ids[transition_id] = true
+	_set_live_animation_card_visibility(animated_card_ids, false)
 	for index in cards.size():
 		var card: Dictionary = cards[index]
 		var anchor_keys := _action_animation_anchor_keys(route, player_index, source_player_index, card, target_id)
@@ -4136,11 +4769,11 @@ func _animate_recorded_action(record: Dictionary, previous_state: Dictionary, cu
 		if end_anchor == "meld_%d" % player_index:
 			end_fallback = meld_point
 		var flight_points := _animation_flight_points(card, start_anchor, end_anchor, previous_points, current_points, start_fallback, end_fallback)
-		_spawn_action_card_flight(Dictionary(card), flight_points.get("start", start_fallback), flight_points.get("end", end_fallback), index * 0.08)
+		_spawn_action_card_flight(Dictionary(card), flight_points.get("start", start_fallback), flight_points.get("end", end_fallback), card_flight_delay)
 	var action_point := _animation_snapshot_point(current_points, "", "action_%d" % player_index, meld_point if route == "discard_to_meld" else discard_end_point)
-	_spawn_action_text(action_type, player_index, action_point, 0.08)
+	_spawn_action_text(action_type, player_index, action_point, action_text_delay)
+	var restore_delay := card_flight_delay + ACTION_ANIMATION_SECONDS
 	if action_type in ["draw", "discard", "bao"]:
-		var transition_meld := _new_transition_meld(previous_state, current_state)
 		if not transition_meld.is_empty():
 			var transition_player := int(transition_meld.get("playerIndex", player_index))
 			var transition_hand_point := _animation_snapshot_or_group_point(previous_points, "hand_%d" % transition_player, "live_hand_source_%d" % transition_player, fallback)
@@ -4151,13 +4784,21 @@ func _animate_recorded_action(record: Dictionary, previous_state: Dictionary, cu
 				if transition_target:
 					continue
 				var transition_points := _animation_flight_points(transition_card, "hand_%d" % transition_player, "meld_%d" % transition_player, previous_points, current_points, transition_hand_point, transition_meld_point)
-				_spawn_action_card_flight(transition_card, transition_points.get("start", transition_hand_point), transition_points.get("end", transition_meld_point), ACTION_ANIMATION_SECONDS + 0.14 + index * 0.07)
+				_spawn_action_card_flight(transition_card, transition_points.get("start", transition_hand_point), transition_points.get("end", transition_meld_point), ACTION_ANIMATION_SECONDS)
+			restore_delay = maxf(restore_delay, ACTION_ANIMATION_SECONDS * 2.0)
+	var animation_generation := _action_animation_generation
+	var restore_tween := create_tween()
+	restore_tween.tween_interval(restore_delay)
+	restore_tween.tween_callback(func():
+		if animation_generation == _action_animation_generation:
+			_set_live_animation_card_visibility(animated_card_ids, true)
+	)
 
 func _clear_action_animations() -> void:
 	if not is_instance_valid(_action_animation_layer):
 		return
 	for child in _action_animation_layer.get_children():
-		child.queue_free()
+		child.free()
 
 func _animate_live_table_update(current_turn: int, discard_changed: bool, previous_state: Dictionary = {}, current_state: Dictionary = {}) -> void:
 	var seats := get_tree().get_nodes_in_group("live_turn_seat_%d" % current_turn)
@@ -4165,9 +4806,9 @@ func _animate_live_table_update(current_turn: int, discard_changed: bool, previo
 		var seat: Control = seats[0]
 		seat.modulate = Color(1.0, 1.0, 1.0, 0.45)
 		var seat_tween := create_tween()
-		seat_tween.tween_property(seat, "modulate:a", 1.0, 0.22)
-		seat_tween.tween_property(seat, "modulate:a", 0.72, 0.22)
-		seat_tween.tween_property(seat, "modulate:a", 1.0, 0.22)
+		seat_tween.tween_property(seat, "modulate:a", 1.0, ANIMATION_DURATION_SECONDS / 3.0)
+		seat_tween.tween_property(seat, "modulate:a", 0.72, ANIMATION_DURATION_SECONDS / 3.0)
+		seat_tween.tween_property(seat, "modulate:a", 1.0, ANIMATION_DURATION_SECONDS / 3.0)
 	if discard_changed:
 		var current_pile: Dictionary = current_state.get("discardPile", {})
 		var current_pending_id := str(Dictionary(current_pile.get("lastDiscard", {})).get("id", ""))
@@ -4182,10 +4823,10 @@ func _animate_live_table_update(current_turn: int, discard_changed: bool, previo
 				continue
 			discard.pivot_offset = discard.size * 0.5
 			discard.scale = Vector2(0.78, 0.78)
-			discard.modulate = Color(1.0, 1.0, 1.0, 0.2)
+			discard.modulate = Color(DISCARD_PENDING_MODULATE, 0.2)
 			var card_tween := create_tween().set_parallel(true)
-			card_tween.tween_property(discard, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-			card_tween.tween_property(discard, "modulate:a", 1.0, 0.14)
+			card_tween.tween_property(discard, "scale", Vector2.ONE, ANIMATION_DURATION_SECONDS).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			card_tween.tween_property(discard, "modulate", DISCARD_PENDING_MODULATE, ANIMATION_DURATION_SECONDS)
 			break
 	var previous_pending := _pending_response_card(previous_state)
 	if not previous_pending.is_empty() and not current_state.is_empty():
@@ -4197,25 +4838,56 @@ func _animate_live_table_update(current_turn: int, discard_changed: bool, previo
 				continue
 			if previous_pending_player >= 0 and int(archived.get_meta("discard_player_index", -1)) != previous_pending_player:
 				continue
-			archived.pivot_offset = archived.size * 0.5
-			archived.scale = Vector2(1.42, 1.42)
-			archived.modulate = Color(0.82, 0.84, 0.78, 0.72)
+			# Archived cards remain the fixed top-text crop. Only their color
+			# settles to the muted state; never enlarge the gray face vertically.
+			archived.scale = Vector2.ONE
+			archived.modulate = Color(DISCARD_LOCKED_MODULATE, 0.72)
 			var archive_tween := create_tween().set_parallel(true)
-			archive_tween.tween_property(archived, "scale", Vector2.ONE, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-			archive_tween.tween_property(archived, "modulate", Color(0.52, 0.56, 0.52, 0.78), 0.28)
+			archive_tween.tween_property(archived, "modulate", DISCARD_LOCKED_MODULATE, ANIMATION_DURATION_SECONDS)
 
 func _on_action_recorded(record: Dictionary) -> void:
 	if page == "game" and not AIService.latest_state.is_empty():
 		var previous_state := _previous_live_state.duplicate(true)
 		var current_state := AIService.latest_state.duplicate(true)
+		var action: Dictionary = record.get("action", {})
+		var action_type := str(action.get("type", ""))
+		var animation_wait := _action_animation_minimum_wait_seconds(action_type)
+		_action_animation_ready_at_msec = maxi(_action_animation_ready_at_msec, Time.get_ticks_msec() + int(roundf(animation_wait * 1000.0)))
+		var animation_generation := _next_action_animation_generation()
+		_clear_action_animations()
+		_response_animation_hold_generation += 1
+		_response_animation_hold = {}
+		var hold := _response_animation_hold_for_action(action, previous_state, current_state)
+		var hold_generation := 0
+		if not hold.is_empty():
+			hold_generation = _response_animation_hold_generation
+			hold["generation"] = hold_generation
+			_response_animation_hold = hold
+			show_game()
+			var response_player_index := _action_animation_player_index(action, previous_state, current_state)
+			var response_cards := _action_animation_cards(action, previous_state, current_state, response_player_index)
+			_set_live_animation_card_visibility(_animation_card_id_set(response_cards), false, true)
 		# Wait for the rebuilt table to finish one layout pass before sampling the
 		# destination anchors. Sampling during show_game() can capture a zero-sized
 		# meld container at the table's lower-left fallback position.
-		call_deferred("_animate_recorded_action_after_layout", record.duplicate(true), previous_state, current_state)
+		call_deferred("_animate_recorded_action_after_layout", record.duplicate(true), previous_state, current_state, animation_generation, hold_generation)
 
-func _animate_recorded_action_after_layout(record: Dictionary, previous_state: Dictionary, current_state: Dictionary) -> void:
+func _animate_recorded_action_after_layout(record: Dictionary, previous_state: Dictionary, current_state: Dictionary, animation_generation: int, hold_generation: int) -> void:
 		await get_tree().process_frame
 		await get_tree().process_frame
+		if animation_generation != _action_animation_generation:
+			return
+		if hold_generation > 0:
+			await get_tree().create_timer(RESPONSE_ANIMATION_HOLD_SECONDS).timeout
+			if animation_generation != _action_animation_generation or hold_generation != _response_animation_hold_generation:
+				return
+			_response_animation_hold = {}
+			show_game()
+			await get_tree().process_frame
+			await get_tree().process_frame
+			if animation_generation != _action_animation_generation:
+				return
+		_clear_action_animations()
 		_current_live_animation_positions = _capture_live_animation_positions()
 		_animate_recorded_action(record, previous_state, current_state)
 

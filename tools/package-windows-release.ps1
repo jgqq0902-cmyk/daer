@@ -1,7 +1,5 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$CoreWorkspace,
     [string]$GodotExecutable = "K:\godot\Godot_v4.7.1-stable_win64_console.exe",
     [string]$NodeRuntime = "C:\Program Files\nodejs\node.exe",
     [string]$OutputDirectory = (Join-Path $PSScriptRoot "..\build\windows"),
@@ -11,7 +9,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$coreRoot = (Resolve-Path (Join-Path $CoreWorkspace 'packages\core')).Path
+$coreRoot = (Resolve-Path (Join-Path $projectRoot 'packages\core')).Path
 $nodeRuntimePath = (Resolve-Path $NodeRuntime).Path
 $godotPath = (Resolve-Path $GodotExecutable).Path
 $outputPath = [IO.Path]::GetFullPath($OutputDirectory)
@@ -73,8 +71,6 @@ function Assert-ReleaseIsolation([string]$rootPath) {
         'mcp_runtime_probe.gd',
         'scripts\test_runner.gd',
         'scripts/test_runner.gd',
-        'E:\project\daer',
-        'E:/project/daer',
         'K:\godot\daer',
         'K:/godot/daer'
     )

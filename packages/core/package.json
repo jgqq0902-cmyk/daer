@@ -1,0 +1,50 @@
+{
+  "name": "@daer/core",
+  "version": "0.1.0",
+  "description": "泸州大贰核心引擎 - 游戏规则、AI分析",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": [
+    "src",
+    "scripts",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --noEmit",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "ai:selfplay:sample": "tsx scripts/selfplay-discard-sampler.ts",
+    "ai:oracle:eval": "tsx scripts/rollout-oracle-eval.ts",
+    "ai:artifact:export": "tsx scripts/export-policy-artifact.ts",
+    "ai:artifact:load": "tsx scripts/load-policy-artifact.ts",
+    "ai:policy:eval": "tsx scripts/evaluate-policy.ts",
+    "ai:benchmark:build": "tsx scripts/rollout-build-benchmark-corpus.ts",
+    "ai:benchmark:build:resume": "tsx scripts/rollout-build-benchmark-corpus.ts --resume=true --maxBatches=1 --targetSamples=360",
+    "ai:benchmark:build:resume:high": "tsx scripts/rollout-build-benchmark-corpus.ts --resume=true --maxBatches=1 --targetSamples=360 --batchSelfPlayGames=40 --batchMaxSamples=720 --rolloutCountPerAction=36 --maxRolloutSteps=320 --maxPerCategory=140 --expectedScoreWeight=1",
+    "ai:benchmark:build:v2:discard:bootstrap": "powershell -ExecutionPolicy Bypass -File scripts/run-holdout-v2-discard-bootstrap.ps1",
+    "ai:winrate:pipeline": "powershell -ExecutionPolicy Bypass -File scripts/run-winrate-gate-pipeline.ps1",
+    "ai:winrate:milestone:loop": "powershell -ExecutionPolicy Bypass -File scripts/run-winrate-milestone-loop.ps1",
+    "ai:train:offline": "tsx scripts/rollout-train-learned-policy.ts",
+    "ai:train:job": "tsx scripts/manage-training-job.ts",
+    "ai:train:dashboard": "tsx scripts/training-dashboard-server.ts",
+    "ai:train:diagnose": "tsx scripts/training-diagnostics.ts",
+    "ai:train:retrain": "tsx scripts/retrain-from-dataset.ts",
+    "ai:train:gate": "tsx scripts/rollout-train-learned-policy.ts --failOnRegression=true --expectedScoreWeight=1 --minSamples=300 --minWinRateDelta=0.005 --minExpectedScoreDelta=-0.05 --minLearnedOracleMatchRate=0.18 --minCategoryWinRateDelta=opening:0,midgame:-0.05 --minActionFamilyOracleMatchRateDelta=discard:-0.03,response:-0.03",
+    "ai:evaluate:offline": "tsx scripts/rollout-evaluate-policy.ts",
+    "ai:godot:server": "tsx scripts/godot-ai-server.ts",
+    "ai:evaluate:milestone": "tsx scripts/rollout-evaluate-policy.ts --datasetFile=benchmarks/discard-holdout-v2/corpus.json --failOnRegression=true --expectedScoreWeight=1 --minSamples=300 --minWinRateDelta=0.0001 --minExpectedScoreDelta=-0.05 --minLearnedOracleMatchRate=0.18 --minCategoryWinRateDelta=midgame:0.0001 --minActionFamilyWinRateDelta=discard:0.0001 --minActionFamilyOracleMatchRateDelta=discard:-0.03,response:-0.03 --requiredBenchmarkVersion=discard-holdout-v2",
+    "ai:evaluate:gate": "tsx scripts/rollout-evaluate-policy.ts --datasetFile=benchmarks/discard-holdout-v2/corpus.json --failOnRegression=true --expectedScoreWeight=1 --minSamples=300 --minWinRateDelta=0.005 --minExpectedScoreDelta=-0.05 --minLearnedOracleMatchRate=0.18 --minCategoryWinRateDelta=opening:0,midgame:-0.05 --minActionFamilyOracleMatchRateDelta=discard:-0.03,response:-0.03 --requiredBenchmarkVersion=discard-holdout-v2",
+    "ai:evaluate:gate:staged": "tsx scripts/rollout-evaluate-policy.ts --datasetFile=benchmarks/discard-holdout-v2/corpus.json --failOnRegression=true --expectedScoreWeight=1 --minSamples=300 --minWinRateDelta=0.005 --minExpectedScoreDelta=-0.05 --minLearnedOracleMatchRate=0.18 --minCategoryWinRateDelta=opening:0,midgame:-0.05 --minCategoryOracleMatchRateDelta=opening:-0.05,midgame:-0.05,endgame:-0.05 --minActionFamilyOracleMatchRateDelta=discard:-0.03,response:-0.03 --requiredBenchmarkVersion=discard-holdout-v2"
+  },
+  "dependencies": {
+    "tsx": "^4.20.6"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^1.6.1",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  }
+}

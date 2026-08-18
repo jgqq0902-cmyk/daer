@@ -1502,13 +1502,31 @@ var RulesValidator = class {
     return Array.from(candidates.values()).filter((card) => this.canHu(handCards, melds, card, "draw", profile) || this.getHuChiOptions(handCards, melds, card, profile).length > 0);
   }
   getBaoDiscardCandidates(handCards, melds = [], profile) {
+    const lockedCardIds = this.getLockedOpeningCardIds(handCards);
     return handCards.map((discardCard) => {
       const remainingCards = handCards.filter((card) => card.id !== discardCard.id);
       return {
         discardCard,
         tingCards: this.getBaoTingCards(remainingCards, melds, profile)
       };
-    }).filter((candidate) => candidate.tingCards.length > 0);
+    }).filter((candidate) => !lockedCardIds.has(candidate.discardCard.id) && candidate.tingCards.length > 0);
+  }
+  getLockedOpeningCardIds(handCards) {
+    const lockedCardIds = /* @__PURE__ */ new Set();
+    const lockedQuadruples = this.meldDetector.detectQuadruples(handCards).melds;
+    for (const meld of lockedQuadruples) {
+      for (const card of meld.cards) {
+        lockedCardIds.add(card.id);
+      }
+    }
+    const tripleCandidates = handCards.filter((card) => !lockedCardIds.has(card.id));
+    const lockedTriples = this.meldDetector.detectTriples(tripleCandidates).melds;
+    for (const meld of lockedTriples) {
+      for (const card of meld.cards) {
+        lockedCardIds.add(card.id);
+      }
+    }
+    return lockedCardIds;
   }
   /**
    * 检查是否可以胡牌
@@ -2280,6 +2298,14 @@ var TurnManager = class {
           });
         }
         addDiscardActions();
+        if (!actions.some((action) => action.type === "discard") && !actions.some((action) => action.type === "bao")) {
+          actions.push({
+            type: "pass",
+            cards: [],
+            isMandatory: true,
+            description: "\u65E0\u53EF\u51FA\u724C\uFF0C\u8DF3\u8FC7\u672C\u56DE\u5408"
+          });
+        }
       }
     }
     if (state.phase === "response_collecting" /* RESPONSE_COLLECTING */ && state.discardPile.lastDiscard) {
@@ -3443,6 +3469,12 @@ var GameManager = class {
     }
     const matchedCard = player.cards.find((card) => card.id === discardCard.id);
     if (!matchedCard) {
+      return state;
+    }
+    const allowedBaoDiscardIds = new Set(
+      this.rulesValidator.getBaoDiscardCandidates(player.cards, player.melds, state.ruleProfile).map((candidate) => candidate.discardCard.id)
+    );
+    if (!allowedBaoDiscardIds.has(matchedCard.id)) {
       return state;
     }
     const remainingCards = player.cards.filter((card) => card.id !== matchedCard.id);
@@ -7509,7 +7541,12 @@ function findOfferedAction(currentState, action) {
     const cardId = action.cards?.[0]?.id;
     return cardId ? currentState.availableActions.find((candidate) => candidate.type === "discard" && candidate.cards.some((card) => card.id === cardId)) : void 0;
   }
-  return currentState.availableActions.find((candidate) => candidate.type === action.type);
+  if (action.type === "bao" && action.cards?.length) {
+    const selectedCardId = action.cards[0]?.id;
+    return selectedCardId ? currentState.availableActions.find((candidate) => candidate.type === "bao" && candidate.cards.some((card) => card.id === selectedCardId)) : void 0;
+  }
+  const offered = currentState.availableActions.find((candidate) => candidate.type === action.type);
+  return offered;
 }
 function normalizeGodotAction(currentState, action) {
   if (!isLegalGodotAction(currentState, action)) return null;
@@ -7551,6 +7588,11 @@ function isGodotParentAlive(processId) {
 }
 function shouldTerminateForGodotParent(parentProcessId2, isParentAlive = isGodotParentAlive) {
   return Number.isSafeInteger(parentProcessId2) && parentProcessId2 > 0 && !isParentAlive(parentProcessId2);
+}
+function isResponseTimeoutDisabled(value = process.env.DAER_DISABLE_RESPONSE_TIMEOUT) {
+  if (value === true) return true;
+  if (typeof value !== "string") return false;
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 function sendJson(response, status, body) {
   response.writeHead(status, {
@@ -7662,6 +7704,7 @@ function createGodotAiRuntimeServer(options = {}) {
   const manager = new GameManager(options.clock);
   const requestAI = options.requestAI || handleAIWorkerRequest;
   const sessionId2 = options.sessionId?.trim() || "";
+  const responseTimeoutDisabled = options.disableResponseTimeout ?? isResponseTimeoutDisabled();
   const configuredAuthToken = options.authToken?.trim() || process.env.DAER_BRIDGE_TOKEN?.trim() || "";
   if (configuredAuthToken && Buffer.byteLength(configuredAuthToken, "utf8") < 32) {
     throw new Error("Bridge auth token must contain at least 256 bits.");
@@ -7726,6 +7769,10 @@ function createGodotAiRuntimeServer(options = {}) {
     syncResponseTimer();
   }
   function syncResponseTimer() {
+    if (responseTimeoutDisabled) {
+      clearResponseTimer();
+      return;
+    }
     const window = state?.responseWindow;
     if (!window || typeof window.currentResponderIndex !== "number") {
       clearResponseTimer();
@@ -7739,9 +7786,11 @@ function createGodotAiRuntimeServer(options = {}) {
   }
   function restore() {
     if (!options.persistenceFile) return;
+    let fallbackConfig;
     try {
       const snapshot = JSON.parse(readFileSync(options.persistenceFile, "utf8"));
       if (snapshot.version !== 3 || !snapshot.gameConfig || typeof snapshot.gameConfig.ruleVersion !== "string" || !Array.isArray(snapshot.actionLog)) return;
+      fallbackConfig = snapshot.gameConfig;
       gameConfig = snapshot.gameConfig;
       state = manager.createGame(gameConfig);
       actionLog = [];
@@ -7756,6 +7805,18 @@ function createGodotAiRuntimeServer(options = {}) {
         actionLog.push(normalized);
       }
     } catch {
+      if (fallbackConfig) {
+        try {
+          gameConfig = fallbackConfig;
+          state = manager.createGame(gameConfig);
+          actionLog = [];
+          replaySteps = [{ state, action: { type: "start", cards: [] } }];
+          lastTransition = void 0;
+          persist();
+          return;
+        } catch {
+        }
+      }
       state = null;
       gameConfig = null;
       actionLog = [];
@@ -7841,7 +7902,7 @@ function createGodotAiRuntimeServer(options = {}) {
     }
     const url = new URL(request.url || "/", "http://127.0.0.1");
     if (request.method === "GET" && url.pathname === "/health") {
-      sendJson(response, 200, { ok: true, runtime: "daer-core", protocolVersion: GODOT_PROTOCOL_VERSION, runtimeVersion: GODOT_RUNTIME_VERSION, sessionId: sessionId2, activeGame: !!state });
+      sendJson(response, 200, { ok: true, runtime: "daer-core", protocolVersion: GODOT_PROTOCOL_VERSION, runtimeVersion: GODOT_RUNTIME_VERSION, sessionId: sessionId2, activeGame: !!state, responseTimeoutDisabled });
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/game/state") {
@@ -7913,6 +7974,10 @@ function createGodotAiRuntimeServer(options = {}) {
     if (url.pathname === "/api/game/timeout") {
       const currentState = requireState();
       if (rejectFinishedGame(response, currentState)) return;
+      if (responseTimeoutDisabled) {
+        sendJson(response, 409, { ok: false, error: "Response timeout is disabled in test mode.", state: presentState(currentState) });
+        return;
+      }
       const window = currentState.responseWindow;
       if (!window || typeof window.currentResponderIndex !== "number") {
         sendJson(response, 409, { ok: false, error: "There is no active response window.", state: presentState(currentState) });
